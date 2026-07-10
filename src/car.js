@@ -4,7 +4,40 @@
 // forward axis.
 import * as THREE from 'three';
 import { GLTFLoader } from '../vendor/loaders/GLTFLoader.js';
+import { DRACOLoader } from '../vendor/loaders/DRACOLoader.js';
 import { makeContactShadowTexture } from './textures.js';
+
+export function makeGLTFLoader() {
+  const draco = new DRACOLoader();
+  draco.setDecoderPath('vendor/draco/');
+  const loader = new GLTFLoader();
+  loader.setDRACOLoader(draco);
+  return loader;
+}
+
+// Find spinnable wheel nodes: nodes named *wheel* whose parent isn't a wheel.
+// Front wheels are detected by name (fl/fr/front); the front-wheel z sign
+// also tells us which way the model faces.
+export function rigWheels(root) {
+  const wheels = [];
+  root.traverse((o) => {
+    if (/wheel/i.test(o.name) && !/wheel/i.test(o.parent?.name || '')) wheels.push(o);
+  });
+  const isFront = (o) => /(_f[lr]\b|front)/i.test(o.name);
+  const fronts = wheels.filter(isFront);
+  let forwardSign = 1;
+  if (fronts.length) {
+    const zAvg = fronts.reduce((a, o) => a + o.position.z, 0) / fronts.length;
+    forwardSign = zAvg >= 0 ? 1 : -1;
+  }
+  for (const w of wheels) w.rotation.order = 'YXZ'; // steer (y) then spin (x)
+  let radius = 0.34;
+  if (wheels.length) {
+    const box = new THREE.Box3().setFromObject(wheels[0]);
+    radius = Math.max(0.12, (box.max.y - box.min.y) / 2);
+  }
+  return { spinNodes: wheels, steerNodes: fronts, forwardSign, radius };
+}
 
 const CAR_LENGTH = 4.4; // meters, GLB models are scaled to this
 
@@ -223,12 +256,15 @@ export function createCar(scene) {
   blob.renderOrder = 2;
   scene.add(blob);
 
-  // try to replace the placeholder with a real model
+  // replace the placeholder with the real model (assets/car.glb)
   const params = new URLSearchParams(location.search);
   const extraYaw = (parseFloat(params.get('carRot') ?? '0') * Math.PI) / 180;
-  new GLTFLoader().load('assets/car.glb', (gltf) => {
+  const paintHex = PAINTS[params.get('paint')] ?? PAINTS.red;
+  makeGLTFLoader().load('assets/car.glb', (gltf) => {
     const model = gltf.scene;
-    model.rotation.y = extraYaw;
+    const wheelRig = rigWheels(model);
+    model.rotation.y = extraYaw + (wheelRig.forwardSign < 0 ? Math.PI : 0);
+
     const holder = new THREE.Group();
     holder.add(model);
     // normalize: longest horizontal axis = car length, wheels on the ground
@@ -241,17 +277,38 @@ export function createCar(scene) {
     model.position.x -= center.x / scale;
     model.position.z -= center.z / scale;
     model.position.y -= box2.min.y / scale;
+
     holder.traverse((o) => {
       if (o.isMesh) {
         o.castShadow = true;
         const mats = Array.isArray(o.material) ? o.material : [o.material];
-        mats.forEach((m) => { if (m.isMeshStandardMaterial) m.envMapIntensity = 1.0; });
+        mats.forEach((m) => {
+          if (!m.isMeshStandardMaterial) return;
+          m.envMapIntensity = 1.0;
+          m.userData.keepEnv = true;
+          // daylight: keep headlight/LED emissives from blowing out in bloom
+          if (m.emissive && (m.emissive.r + m.emissive.g + m.emissive.b) > 0) {
+            m.emissiveIntensity = Math.min(m.emissiveIntensity ?? 1, 0.25);
+          }
+          if (/body.?color|^body$|paint/i.test(m.name || '')) {
+            // repaint the shell with our clearcoat livery
+            m.color.setHex(paintHex);
+            m.metalness = 0.4; m.roughness = 0.25;
+            if ('clearcoat' in m) { m.clearcoat = 1.0; m.clearcoatRoughness = 0.05; }
+          }
+        });
       }
     });
     root.remove(rig.group);
-    rig = { group: holder, wheels: [], steerPivots: [], wheelRadius: 0.34 };
+    rig = {
+      group: holder,
+      wheels: wheelRig.spinNodes,
+      steerPivots: wheelRig.steerNodes,
+      wheelRadius: wheelRig.radius * scale,
+      dir: wheelRig.forwardSign, // steering sign flips with the model's native facing
+    };
     root.add(holder);
-  }, undefined, () => { /* no assets/car.glb yet — placeholder keeps driving */ });
+  }, undefined, () => { /* no assets/car.glb — the sculpted placeholder keeps driving */ });
 
   return {
     root,
@@ -261,12 +318,12 @@ export function createCar(scene) {
       // Euler XYZ: the z component banks the car around its own forward axis.
       // Body rolls OUT of the corner (opposite of the camera's lean-in).
       root.rotation.set(0, Math.atan2(t.x, t.z), roll * 0.7);
-      const spin = (speed * dt) / rig.wheelRadius;
+      const spin = (speed * dt) / rig.wheelRadius * (rig.dir || 1);
       for (const w of rig.wheels) w.rotation.x += spin;
-      for (const pv of rig.steerPivots) pv.rotation.y = steer;
+      for (const pv of rig.steerPivots) pv.rotation.y = steer * (rig.dir || 1);
       blob.position.set(p.x, 0.05, p.z);
       blob.rotation.z = -root.rotation.y;
     },
-    setVisible(v) { root.visible = v; },
+    setVisible(v) { root.visible = v; blob.visible = v; },
   };
 }

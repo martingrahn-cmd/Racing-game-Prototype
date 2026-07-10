@@ -4,6 +4,10 @@
 import * as THREE from 'three';
 import { frameAt, mergeGeoms, buildRibbon, ROAD_HALF } from './track.js';
 import { mulberry32 } from './textures.js';
+import { makeGLTFLoader } from './car.js';
+import * as SkeletonUtils from '../vendor/utils/SkeletonUtils.js';
+
+const CHARACTERS = ['assets/people/anne.glb', 'assets/people/woman.glb', 'assets/people/human.glb'];
 
 const CLOTHES = [
   0xc94f3d, 0x3d6bc9, 0x3da05a, 0xd8c13a, 0xd8d8d8, 0x8a4fc9,
@@ -43,23 +47,26 @@ function personGeometry(cheer) {
   return mergeGeoms(parts);
 }
 
+// Ribbon UVs: u (texture x) runs top→bottom of the strip, v (texture y)
+// repeats along the track — so flags are drawn sideways, hanging toward +x.
 function makeBuntingTexture() {
   const c = document.createElement('canvas');
-  c.width = 256; c.height = 64;
+  c.width = 64; c.height = 256;
   const x = c.getContext('2d');
-  x.clearRect(0, 0, 256, 64);
-  x.strokeStyle = '#e8e8e8'; x.lineWidth = 3;
-  x.beginPath(); x.moveTo(0, 4); x.lineTo(256, 4); x.stroke();
-  const cols = ['#d84a3a', '#e8c53a', '#3a76d8', '#3aa65a', '#e8e8e8', '#8a4fc9'];
-  for (let i = 0; i < 8; i++) {
-    x.fillStyle = cols[i % cols.length];
+  x.clearRect(0, 0, 64, 256);
+  x.strokeStyle = '#e8e8e8'; x.lineWidth = 4;
+  x.beginPath(); x.moveTo(3, 0); x.lineTo(3, 256); x.stroke();
+  const cols = ['#d84a3a', '#e8c53a', '#3a76d8', '#3aa65a'];
+  for (let i = 0; i < 4; i++) {
+    x.fillStyle = cols[i];
+    const y0 = i * 64 + 3;
     x.beginPath();
-    x.moveTo(i * 32 + 2, 4); x.lineTo(i * 32 + 30, 4); x.lineTo(i * 32 + 16, 58);
+    x.moveTo(5, y0); x.lineTo(5, y0 + 58); x.lineTo(58, y0 + 29);
     x.closePath(); x.fill();
   }
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
-  t.wrapS = THREE.RepeatWrapping; t.wrapT = THREE.ClampToEdgeWrapping;
+  t.wrapS = THREE.ClampToEdgeWrapping; t.wrapT = THREE.RepeatWrapping;
   return t;
 }
 
@@ -139,7 +146,7 @@ export function buildExtras(scene, curve, length, cornerSpans) {
         strips.push(buildRibbon(curve, length, [
           { x: side * (ROAD_HALF + 3.7), y: 3.0, u: 0 },
           { x: side * (ROAD_HALF + 3.7), y: 2.62, u: 1 },
-        ], 1 / 1.6, Math.max(8, Math.floor((b - a) / 3)), a, b));
+        ], 1 / 3.2, Math.max(8, Math.floor((b - a) / 3)), a, b));
       }
     }
     if (strips.length) scene.add(new THREE.Mesh(mergeGeoms(strips), mat));
@@ -176,4 +183,76 @@ export function buildExtras(scene, curve, length, cornerSpans) {
       scene.add(cones);
     }
   }
+
+  // ---------------- animated characters (skinned, CC0/CC-BY GLBs) ----------
+  const mixers = [];
+  const walkers = []; // {obj, s, off, side, dir, v}
+
+  const findClip = (clips, re) => clips.find((c) => re.test(c.name));
+  const spawn = (gltf, clipRe, x, z, rot, fallbackRe = /idle/i) => {
+    const obj = SkeletonUtils.clone(gltf.scene);
+    const box = new THREE.Box3().setFromObject(obj);
+    const h = box.max.y - box.min.y;
+    const sc = (1.68 + rng() * 0.16) / h;
+    obj.scale.setScalar(sc);
+    obj.position.set(x, 0, z);
+    obj.rotation.y = rot;
+    obj.traverse((o) => { if (o.isMesh || o.isSkinnedMesh) { o.castShadow = true; o.frustumCulled = false; } });
+    scene.add(obj);
+    const mixer = new THREE.AnimationMixer(obj);
+    const clip = findClip(gltf.animations, clipRe) || findClip(gltf.animations, fallbackRe) || gltf.animations[0];
+    if (clip) {
+      const action = mixer.clipAction(clip);
+      action.timeScale = 0.9 + rng() * 0.25;
+      action.play();
+      mixer.update(rng() * clip.duration); // desync the crowd
+    }
+    mixers.push(mixer);
+    return obj;
+  };
+
+  const loader = makeGLTFLoader();
+  Promise.all(CHARACTERS.map((p) => new Promise((res) => loader.load(p, res, undefined, () => res(null)))))
+    .then((gltfs) => {
+      const loaded = gltfs.filter(Boolean);
+      if (!loaded.length) return;
+      // cheering front row at the corners
+      for (const [a, b] of cornerSpans) {
+        const n = Math.min(6, Math.floor((b - a) / 8));
+        for (let i = 0; i < n; i++) {
+          const s = a + rng() * (b - a);
+          const side = rng() < 0.6 ? 1 : -1;
+          const { p, r } = frameAt(curve, length, s);
+          const off = ROAD_HALF + 3.95 + rng() * 0.5;
+          const yaw = Math.atan2(-side * r.x, -side * r.z);
+          spawn(loaded[Math.floor(rng() * loaded.length)], /wave|yes|cheer/i,
+            p.x + r.x * side * off, p.z + r.z * side * off, yaw + (rng() - 0.5) * 0.4);
+        }
+      }
+      // walkers strolling the sidewalks
+      for (let i = 0; i < 12; i++) {
+        const g = loaded[Math.floor(rng() * loaded.length)];
+        const obj = spawn(g, /walk/i, 0, 0, 0);
+        walkers.push({
+          obj,
+          s: rng() * length,
+          off: ROAD_HALF + 1.6 + rng() * 1.6,
+          side: rng() < 0.5 ? 1 : -1,
+          dir: rng() < 0.5 ? 1 : -1,
+          v: 1.1 + rng() * 0.6,
+        });
+      }
+    });
+
+  return {
+    update(dt) {
+      for (const m of mixers) m.update(dt);
+      for (const w of walkers) {
+        w.s = ((w.s + w.dir * w.v * dt) % length + length) % length;
+        const { p, t, r } = frameAt(curve, length, w.s);
+        w.obj.position.set(p.x + r.x * w.side * w.off, 0.16, p.z + r.z * w.side * w.off);
+        w.obj.rotation.y = Math.atan2(w.dir * t.x, w.dir * t.z);
+      }
+    },
+  };
 }

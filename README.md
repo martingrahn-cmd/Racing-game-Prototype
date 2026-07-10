@@ -1,8 +1,11 @@
 # APEX CITY — Racing game prototype
 
-Ett racingspel-prototyp byggt med **noll externa assets** — ingen bil ännu, bara banan
-och staden. Allt (asfalt, fasader, staket, banderoller, himmel, moln) genereras
-procedurellt i kod vid start. Ridge Racer-inspirerad stadsbana i dagsljus.
+Ridge Racer-inspirerad stadsbana i dagsljus. Miljön (asfalt, fasader, staket,
+banderoller, himmel, moln, publik-rekvisita) genereras **procedurellt i kod** —
+fordonen och de animerade karaktärerna är fria CC0/CC-BY-modeller
+(se [assets/LICENSES.md](assets/LICENSES.md)). Spelarbilen är en Ferrari 458
+med styrande framhjul och rullande hjul, stadstrafik kör i båda filerna, och
+publiken vinkar bakom staketen.
 
 ![Chase-kamera under sponsorportal](docs/screenshot-chase.png)
 
@@ -52,12 +55,14 @@ URL-parametrar för felsökning: `?s=520&cam=2&speed=4` (position på banan, kam
 - Adaptiv kvalitet: sänker pixel ratio och skuggupplösning automatiskt om
   bilduppdateringen sjunker, så det rullar även på mobil
 
-## Byt ut bilen mot en riktig modell
+## Byt ut bilen
 
-En procedurell platshållarbil kör banan direkt. För snyggare bil: ladda ner en fri
-modell och lägg den som **`assets/car.glb`** — spelet hittar den automatiskt,
-skalar den till rätt längd och ställer den på vägen. Pekar modellen åt fel håll,
-justera med URL-parametern `?carRot=90` (eller 180/270).
+Spelarbilen läses från **`assets/car.glb`** — byt fil så tar den nya modellen över
+automatiskt: den skalas till rätt längd, ställs på marken, och hjulnoder (namn
+som innehåller "wheel"/"front") hittas automatiskt för rullning + styrning.
+Draco-komprimerade GLB:er stöds. Pekar modellen åt fel håll, justera med
+URL-parametern `?carRot=90` (eller 180/270). Utan `car.glb` kör en procedurellt
+skulpterad reservbil. Saknas nätverket är alla modeller redan committade i `assets/`.
 
 Bra gratiskällor (GLB/glTF, testade licenser):
 

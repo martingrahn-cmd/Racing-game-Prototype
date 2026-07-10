@@ -7,6 +7,7 @@ import { buildSky, SUN_DIR } from './sky.js';
 import { createPost } from './post.js';
 import { createCar } from './car.js';
 import { buildExtras } from './extras.js';
+import { buildTraffic } from './traffic.js';
 
 // ------------------------------------------------------------ renderer
 const canvas = document.getElementById('game');
@@ -53,7 +54,8 @@ scene.add(hemi);
 const sky = buildSky(scene);
 const { curve, length, cornerSpans } = buildTrack(scene);
 buildCity(scene, curve, length);
-buildExtras(scene, curve, length, cornerSpans);
+const extras = buildExtras(scene, curve, length, cornerSpans);
+const traffic = buildTraffic(scene, curve, length);
 const car = createCar(scene);
 
 // image-based lighting from the generated sky (gives glass its sheen)
@@ -286,6 +288,8 @@ function loop(now) {
   }
 
   const kmh = updateCamera(dt, perfTime);
+  extras.update(dt);
+  traffic.update(dt);
   autoQuality(dt);
   if (postEnabled) {
     const sf = (kmh - 90) / 210;
