@@ -25,7 +25,7 @@ export function createDayNight({ scene, sky, sun, hemi, post }) {
     cycleSec: parseFloat(q.get('cycle') ?? '240'), // 2 min day + 2 min night
     auto: !q.has('tod'),
     timeOfDay: q.has('tod') ? parseFloat(q.get('tod')) : Math.random(), // random start
-    moonIntensity: 0.6,
+    moonIntensity: 0.9,
     nightExposure: 1.14,
     headlights: 1.0, // global multiplier, wired by the GUI via car.setHeadlightScale
   };
