@@ -102,6 +102,41 @@ addEventListener('keydown', (e) => {
     guiVisible ? gui.show() : gui.hide();
   }
 });
+
+// ---------------------------------------------------------- photo mode
+// Captures the frame with a burned-in coordinate stamp (and coords in the
+// filename) so a screenshot doubles as a bug report we can teleport back to.
+let photoRequested = false;
+addEventListener('keydown', (e) => { if (e.code === 'KeyP') photoRequested = true; });
+document.getElementById('btnPhoto').addEventListener('click', () => { photoRequested = true; });
+
+function takePhoto(st) {
+  const pos = st ? st.pos : carGround;
+  const tod = daynight.params.timeOfDay;
+  const w = canvas.width, h = canvas.height;
+  const c2 = document.createElement('canvas');
+  c2.width = w; c2.height = h;
+  const x = c2.getContext('2d');
+  x.drawImage(canvas, 0, 0);
+  const stamp = `x ${pos.x.toFixed(1)}  z ${pos.z.toFixed(1)}  s ${Math.round(sPos)} m  tod ${tod.toFixed(3)}  cam ${CAM_NAMES[camMode]}`;
+  const fs = Math.max(13, Math.round(h * 0.02));
+  x.font = `bold ${fs}px monospace`;
+  const tw = x.measureText(stamp).width;
+  x.fillStyle = 'rgba(8,10,14,0.72)';
+  x.fillRect(10, h - fs * 2.2, tw + 24, fs * 1.8);
+  x.fillStyle = '#ffd94a';
+  x.fillText(stamp, 22, h - fs);
+  const name = `apex_x${pos.x.toFixed(0)}_z${pos.z.toFixed(0)}_s${Math.round(sPos)}_tod${tod.toFixed(2)}.png`;
+  c2.toBlob((blob) => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  });
+  elPrompt.textContent = `📸 ${name}`;
+  promptTimer = 2.5;
+}
 // browsers unlock audio on a user gesture; any of these will do
 for (const ev of ['keydown', 'pointerdown', 'gamepadconnected']) {
   addEventListener(ev, () => audio.resume());
@@ -179,11 +214,11 @@ function updateCamera(dt, time, st) {
     pointAt(sPos, carGround).y += 0.035;
     const fr = frameAt(curve, length, sPos);
     dirVec.copy(fr.t);
-    const curvature = signedCurvature(sPos);
-    roll = THREE.MathUtils.clamp(-curvature * 1.6, -0.10, 0.10);
+    const curvature = signedCurvature(sPos); // positive = right-hand corner
+    roll = THREE.MathUtils.clamp(curvature * 1.6, -0.10, 0.10);
     steer = THREE.MathUtils.clamp(curvature * 2.2, -0.45, 0.45);
   }
-  rightVec.set(dirVec.z, 0, -dirVec.x);
+  rightVec.set(-dirVec.z, 0, dirVec.x); // true right = dir × up
   const sf = THREE.MathUtils.clamp((kmh - 90) / 210, 0, 1);
   const back = st?.lookBack ? -1 : 1; // held: camera swings to face rearward
 
@@ -336,6 +371,7 @@ const elSpeed = document.getElementById('speed');
 const elFps = document.getElementById('fps');
 const elCam = document.getElementById('camName');
 const elPrompt = document.getElementById('prompt');
+const elCoords = document.getElementById('coords');
 const CAM_NAMES = ['CHASE', 'BUMPER', 'HELI', 'TV', 'PHOTO'];
 const ATTRACT_PROMPT = 'GASA FÖR ATT KÖRA — ↑ / W ELLER RT PÅ HANDKONTROLL';
 let promptTimer = 0;
@@ -378,6 +414,10 @@ function loop(now) {
   } else {
     renderer.render(scene, camera);
   }
+  if (photoRequested) { // same task as the render: the buffer is still intact
+    photoRequested = false;
+    takePhoto(st);
+  }
 
   // HUD
   elSpeed.textContent = String(Math.round(st ? kmh : kmh + Math.sin(perfTime * 9) * 1.4));
@@ -395,6 +435,8 @@ function loop(now) {
   fpsAcc += dt; fpsN++; fpsTimer += dt;
   if (fpsTimer > 0.5) {
     elFps.textContent = `${Math.round(fpsN / fpsAcc)} FPS`;
+    const cp = st ? st.pos : carGround;
+    elCoords.textContent = `x ${cp.x.toFixed(0)} · z ${cp.z.toFixed(0)} · s ${Math.round(sPos)} m · ${daynight.params.timeOfDay.toFixed(2)}`;
     fpsAcc = 0; fpsN = 0; fpsTimer = 0;
   }
 
@@ -407,6 +449,7 @@ function loop(now) {
   window.__dbg = {
     cam: camera.position.toArray().map((n) => +n.toFixed(1)),
     car: st ? st.pos.toArray().map((n) => +n.toFixed(1)) : null,
+    yaw: st ? +st.yaw.toFixed(3) : null,
     kmh: Math.round(kmh), tier, playing: drive.playing,
   };
 }

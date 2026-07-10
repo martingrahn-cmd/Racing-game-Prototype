@@ -48,6 +48,11 @@
     font-size: 12px; font-weight: 700; letter-spacing: 0.1em;
     color: rgba(255,255,255,0.55);
   }
+  #coords {
+    top: max(32px, calc(env(safe-area-inset-top) + 18px)); right: 20px;
+    font-size: 11px; font-weight: 600; font-family: ui-monospace, monospace;
+    color: rgba(255,255,255,0.45); text-align: right;
+  }
   #hint {
     left: 50%; transform: translateX(-50%);
     bottom: max(18px, env(safe-area-inset-bottom));
@@ -103,15 +108,17 @@
 
 <div class="hud" id="title">APEX CITY<small>STADSBANA · PROTOTYP</small></div>
 <div class="hud" id="fps"></div>
+<div class="hud" id="coords"></div>
 <div class="hud" id="speedBox"><div id="speed">180</div><div class="unit">KM/H</div></div>
 <div class="hud" id="camName">CHASE</div>
-<div class="hud" id="hint">[↑↓←→/WASD] KÖR &nbsp;·&nbsp; [SPACE] HANDBROMS &nbsp;·&nbsp; [B] BAKÅT &nbsp;·&nbsp; [H] TUTA &nbsp;·&nbsp; [R] RESET &nbsp;·&nbsp; [C] KAMERA</div>
+<div class="hud" id="hint">[↑↓←→/WASD] KÖR &nbsp;·&nbsp; [SPACE] HANDBROMS &nbsp;·&nbsp; [B] BAKÅT &nbsp;·&nbsp; [H] TUTA &nbsp;·&nbsp; [R] RESET &nbsp;·&nbsp; [P] FOTO &nbsp;·&nbsp; [C] KAMERA &nbsp;·&nbsp; [G] DEBUG</div>
 <div class="hud" id="prompt"></div>
 
 <canvas id="minimap" width="150" height="150"></canvas>
 
 <div id="controls">
   <button id="btnCam" title="Byt kamera">📷</button>
+  <button id="btnPhoto" title="Ta foto med koordinater">📸</button>
   <button id="btnPlus" title="Öka fart">+</button>
   <button id="btnMinus" title="Sänk fart">−</button>
 </div>
