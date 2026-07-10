@@ -116,6 +116,7 @@ export function createDrive(curve, length) {
   return {
     get playing() { return playing; },
     get sEst() { return sEst; },
+    get padConnected() { return padIndex !== null; },
     consumeCameraTap() { const t = cameraTapped; cameraTapped = false; return t; },
     consumePadToast() { const t = padToast; padToast = 0; return t; },
 

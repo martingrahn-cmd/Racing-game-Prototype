@@ -372,6 +372,9 @@ const elFps = document.getElementById('fps');
 const elCam = document.getElementById('camName');
 const elPrompt = document.getElementById('prompt');
 const elCoords = document.getElementById('coords');
+const elHint = document.getElementById('hint');
+const HINT_KEYS = '[↑↓←→/WASD] KÖR  ·  [SPACE] HANDBROMS  ·  [B] BAKÅT  ·  [H] TUTA  ·  [R] RESET  ·  [P] FOTO  ·  [C] KAMERA  ·  [G] DEBUG';
+const HINT_PAD = '[RT] GAS  ·  [LT] BROMS  ·  [A] HANDBROMS  ·  [B] BAKÅT  ·  [X] TUTA  ·  [SELECT] RESET  ·  [Y] KAMERA';
 const CAM_NAMES = ['CHASE', 'BUMPER', 'HELI', 'TV', 'PHOTO'];
 const ATTRACT_PROMPT = 'GASA FÖR ATT KÖRA — ↑ / W ELLER RT PÅ HANDKONTROLL';
 let promptTimer = 0;
@@ -437,6 +440,9 @@ function loop(now) {
     elFps.textContent = `${Math.round(fpsN / fpsAcc)} FPS`;
     const cp = st ? st.pos : carGround;
     elCoords.textContent = `x ${cp.x.toFixed(0)} · z ${cp.z.toFixed(0)} · s ${Math.round(sPos)} m · ${daynight.params.timeOfDay.toFixed(2)}`;
+    // the hint row follows the active input device
+    const hint = drive.padConnected ? HINT_PAD : HINT_KEYS;
+    if (elHint.textContent !== hint) elHint.textContent = hint;
     fpsAcc = 0; fpsN = 0; fpsTimer = 0;
   }
 
