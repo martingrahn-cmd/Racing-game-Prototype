@@ -25,8 +25,8 @@ export function createDayNight({ scene, sky, sun, hemi, post }) {
     cycleSec: parseFloat(q.get('cycle') ?? '240'), // 2 min day + 2 min night
     auto: !q.has('tod'),
     timeOfDay: q.has('tod') ? parseFloat(q.get('tod')) : Math.random(), // random start
-    moonIntensity: 0.38,
-    nightExposure: 1.08,
+    moonIntensity: 0.6,
+    nightExposure: 1.14,
     headlights: 1.0, // global multiplier, wired by the GUI via car.setHeadlightScale
   };
 
@@ -74,7 +74,7 @@ export function createDayNight({ scene, sky, sun, hemi, post }) {
       sun.intensity = 3.1 * d + params.moonIntensity * (1 - d);
       c1.copy(MOON_COL).lerp(SUN_WARM, d).lerp(SUN_SET, twilight * d * 0.75);
       sun.color.copy(c1);
-      hemi.intensity = 0.3 + 0.56 * d; // city-glow floor keeps the road readable
+      hemi.intensity = 0.42 + 0.44 * d; // city-glow floor keeps the road readable
       hemi.color.copy(c2.copy(HEMI_NIGHT_SKY).lerp(HEMI_DAY_SKY, d));
       hemi.groundColor.copy(c2.copy(HEMI_NIGHT_GND).lerp(HEMI_DAY_GND, d));
 

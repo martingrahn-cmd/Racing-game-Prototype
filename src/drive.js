@@ -87,6 +87,8 @@ export function createDrive(curve, length) {
   const heading = new THREE.Vector3(0, 0, 1);
   const fwd = new THREE.Vector3(), right = new THREE.Vector3(), tmp = new THREE.Vector3();
   let yaw = 0;
+  let yawVel = 0;   // angular momentum: handbrake spins carry past 90°
+  let lastDir = 1;  // travel direction memory while fwd speed passes through 0
   let sEst = 0;
   let playing = false;
   let wallBuzz = 0;
@@ -134,6 +136,7 @@ export function createDrive(curve, length) {
         const { p, t } = frameAt(curve, length, sEst);
         pos.copy(p); pos.y = 0;
         yaw = Math.atan2(t.x, t.z);
+        yawVel = 0;
         vel.set(t.x, 0, t.z).multiplyScalar(3);
       }
 
@@ -143,9 +146,15 @@ export function createDrive(curve, length) {
 
       // steering: full lock at low speed, tightening down as speed rises.
       // positive steer = turn right = yaw DECREASES (heading (sin,cos) is CCW).
+      // Rotation carries angular momentum and is scaled by TOTAL speed, not
+      // forward speed — so a handbrake flick swings past 90° into a full spin.
       const steerAuthority = TUNE.steer - TUNE.steer * 0.65 * Math.min(Math.abs(fwdSpeed) / 45, 1);
-      const yawRate = inp.steer * steerAuthority * (inp.hand ? TUNE.driftSteer : 1);
-      if (Math.abs(fwdSpeed) > 0.4) yaw -= yawRate * Math.sign(fwdSpeed) * Math.min(Math.abs(fwdSpeed) / 6, 1) * dt;
+      if (Math.abs(fwdSpeed) > 1) lastDir = Math.sign(fwdSpeed);
+      const targetYawVel = -inp.steer * steerAuthority * (inp.hand ? TUNE.driftSteer : 1)
+        * lastDir * Math.min(speed / 6, 1);
+      const response = inp.hand ? 3.2 : 10; // sliding tires hold their rotation
+      yawVel += (targetYawVel - yawVel) * Math.min(1, response * dt);
+      yaw += yawVel * dt;
       heading.set(Math.sin(yaw), 0, Math.cos(yaw));
 
       // throttle / brake / reverse
