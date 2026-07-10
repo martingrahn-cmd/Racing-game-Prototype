@@ -80,6 +80,7 @@ export function buildCity(scene, curve, length) {
   const placements = [[], [], []]; // per class: {x, y?, z, yaw, sx, sy, sz, tint}
   const treeSpots = [];
   const billboards = []; // {x, z, yaw, w, h, y, ad}
+  const rooftopAds = []; // {x, z, yaw, y, w, ad}
   const antennas = [];   // {x, z, y, h}
 
   const maybeCrown = (b, cls, rngv) => {
@@ -124,6 +125,13 @@ export function buildCity(scene, curve, length) {
       };
       placements[cls].push(b);
       maybeCrown(b, cls, rng());
+      // rooftop billboard silhouettes near the track
+      if (cls === 1 && b.sy > 15 && b.sy < 34 && rng() < 0.3) {
+        rooftopAds.push({
+          x: b.x, z: b.z, yaw: yaw + (rng() < 0.5 ? 0 : Math.PI), // face along the street
+          y: b.sy, w: Math.min(b.sx, 12) * 0.9, ad: Math.floor(rng() * 4),
+        });
+      }
       // wall ad facing the track
       if (cls >= 1 && b.sy > 13 && rng() < 0.24) {
         const face = off - d / 2 - 0.18;
@@ -202,9 +210,39 @@ export function buildCity(scene, curve, length) {
     scene.add(am);
   }
 
+  // --- rooftop billboards (panel + posts, Ridge Racer skyline furniture) ------
+  const adsTex = makeAdsAtlas();
+  if (rooftopAds.length) {
+    const steel = [];
+    const panels = [];
+    for (const b of rooftopAds) {
+      const h = b.w * 0.42;
+      const rot = new THREE.Matrix4().makeRotationY(b.yaw);
+      const place = (g, lx, ly, lz) => {
+        const off = new THREE.Vector3(lx, ly, lz).applyMatrix4(rot);
+        g.applyMatrix4(rot.clone().setPosition(b.x + off.x, b.y + off.y, b.z + off.z));
+        return g;
+      };
+      for (const sx of [-b.w * 0.35, b.w * 0.35]) {
+        steel.push(place(new THREE.BoxGeometry(0.25, 2.2, 0.25), sx, 1.1, 0));
+      }
+      const panel = new THREE.PlaneGeometry(b.w, h);
+      const uvA = panel.attributes.uv;
+      const u0 = (b.ad % 2) * 0.5, v0 = 0.5 - Math.floor(b.ad / 2) * 0.5;
+      for (let i = 0; i < uvA.count; i++) uvA.setXY(i, u0 + uvA.getX(i) * 0.5, v0 + uvA.getY(i) * 0.5);
+      panels.push(place(panel, 0, 2.2 + h / 2, 0.15));
+      steel.push(place(new THREE.BoxGeometry(b.w * 1.04, h * 1.08, 0.18), 0, 2.2 + h / 2, 0));
+    }
+    const steelMesh = new THREE.Mesh(mergeGeoms(steel),
+      new THREE.MeshStandardMaterial({ color: 0x2f333a, roughness: 0.6, metalness: 0.4 }));
+    scene.add(steelMesh);
+    scene.add(new THREE.Mesh(mergeGeoms(panels), new THREE.MeshStandardMaterial({
+      map: adsTex, emissiveMap: adsTex, emissive: 0xffffff, emissiveIntensity: 0.35, roughness: 0.6,
+    })));
+  }
+
   // --- wall ads (merged planes with atlas UVs, slightly emissive) -------------
   if (billboards.length) {
-    const adsTex = makeAdsAtlas();
     const adGeos = billboards.map((b) => {
       const g = new THREE.PlaneGeometry(b.w, b.w * 0.75);
       const uvA = g.attributes.uv;

@@ -6,6 +6,7 @@ import { buildCity } from './city.js';
 import { buildSky, SUN_DIR } from './sky.js';
 import { createPost } from './post.js';
 import { createCar } from './car.js';
+import { buildExtras } from './extras.js';
 
 // ------------------------------------------------------------ renderer
 const canvas = document.getElementById('game');
@@ -50,8 +51,9 @@ scene.add(hemi);
 
 // ------------------------------------------------------------ world
 const sky = buildSky(scene);
-const { curve, length } = buildTrack(scene);
+const { curve, length, cornerSpans } = buildTrack(scene);
 buildCity(scene, curve, length);
+buildExtras(scene, curve, length, cornerSpans);
 const car = createCar(scene);
 
 // image-based lighting from the generated sky (gives glass its sheen)
@@ -75,8 +77,8 @@ const SPEEDS = [90, 140, 180, 240, 300]; // km/h
 const params = new URLSearchParams(location.search);
 let speedIdx = THREE.MathUtils.clamp(parseInt(params.get('speed') ?? '2', 10), 0, SPEEDS.length - 1);
 let sPos = parseFloat(params.get('s') ?? '0');
-let camMode = THREE.MathUtils.clamp(parseInt(params.get('cam') ?? '0', 10), 0, 3);
-let lastUserSwitch = -30;
+let camMode = THREE.MathUtils.clamp(parseInt(params.get('cam') ?? '0', 10), 0, 4); // 4 = photo orbit (URL only)
+let lastUserSwitch = params.has('cam') ? Infinity : -30; // explicit ?cam= pins the camera
 let autoTimer = 0;
 let tracksideS = null;
 
@@ -132,6 +134,13 @@ function updateCamera(dt, time) {
     camPos.y += 46;
     camPos.addScaledVector(fr.r, 22);
     pointAt(sPos + 40, lookP).y += 2;
+  } else if (camMode === 4) { // photo orbit around the car
+    const a = time * 0.35;
+    camPos.copy(carGround);
+    camPos.x += Math.cos(a) * 6.8;
+    camPos.z += Math.sin(a) * 6.8;
+    camPos.y += 1.55;
+    lookP.copy(carGround); lookP.y += 0.55;
   } else { // trackside cinematic
     if (tracksideS === null || modDist(tracksideS, sPos) < length - 25 && modDist(sPos, tracksideS) > 180) {
       tracksideS = (sPos + 95) % length;
@@ -146,8 +155,8 @@ function updateCamera(dt, time) {
     lookP.copy(carP);
   }
 
-  // speed shake (not for trackside)
-  if (camMode !== 3) {
+  // speed shake (not for trackside/photo)
+  if (camMode !== 3 && camMode !== 4) {
     camPos.y += Math.sin(time * 31) * 0.018 * (0.3 + sf);
     camPos.addScaledVector(fr.r, Math.sin(time * 23.7) * 0.02 * (0.3 + sf));
   }
@@ -253,7 +262,7 @@ resize();
 const elSpeed = document.getElementById('speed');
 const elFps = document.getElementById('fps');
 const elCam = document.getElementById('camName');
-const CAM_NAMES = ['CHASE', 'BUMPER', 'HELI', 'TV'];
+const CAM_NAMES = ['CHASE', 'BUMPER', 'HELI', 'TV', 'PHOTO'];
 let fpsAcc = 0, fpsN = 0, fpsTimer = 0;
 
 // ------------------------------------------------------------ main loop

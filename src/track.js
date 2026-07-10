@@ -33,7 +33,7 @@ export function frameAt(curve, length, s) {
 
 // Build a ribbon mesh: profile nodes {x: lateral (+right), y: height, u} swept
 // along the curve, optionally only over the arc range [s0, s1].
-function buildRibbon(curve, length, profile, vScale, samples = 720, s0 = 0, s1 = null) {
+export function buildRibbon(curve, length, profile, vScale, samples = 720, s0 = 0, s1 = null) {
   if (s1 === null) s1 = length;
   const rows = samples + 1;
   const n = profile.length;
@@ -382,7 +382,7 @@ export function buildTrack(scene) {
     scene.add(line);
   }
 
-  return { curve, length };
+  return { curve, length, cornerSpans };
 }
 
 export { ROAD_HALF, UP };
