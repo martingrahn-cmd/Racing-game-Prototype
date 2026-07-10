@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from '../vendor/loaders/GLTFLoader.js';
 import { DRACOLoader } from '../vendor/loaders/DRACOLoader.js';
 import { makeContactShadowTexture } from './textures.js';
-import { registerEmissive, registerLight } from './night.js';
+import { registerEmissive, registerLight, getDayness } from './night.js';
 
 export function makeGLTFLoader() {
   const draco = new DRACOLoader();
@@ -17,27 +17,36 @@ export function makeGLTFLoader() {
 }
 
 // Find spinnable wheel nodes: nodes named *wheel* whose parent isn't a wheel.
-// Front wheels are detected by name (fl/fr/front); the front-wheel z sign
-// also tells us which way the model faces.
+// Every wheel is re-parented under a pivot placed at its true bounding-box
+// centre — many models keep the wheel mesh origin elsewhere, which made the
+// wheels orbit ("jump around") instead of spinning in place. Front wheels are
+// detected by name; their z sign tells us which way the model faces.
 export function rigWheels(root) {
+  root.updateMatrixWorld(true);
   const wheels = [];
   root.traverse((o) => {
     if (/wheel/i.test(o.name) && !/wheel/i.test(o.parent?.name || '')) wheels.push(o);
   });
   const isFront = (o) => /(_f[lr]\b|front)/i.test(o.name);
-  const fronts = wheels.filter(isFront);
-  let forwardSign = 1;
-  if (fronts.length) {
-    const zAvg = fronts.reduce((a, o) => a + o.position.z, 0) / fronts.length;
-    forwardSign = zAvg >= 0 ? 1 : -1;
-  }
-  for (const w of wheels) w.rotation.order = 'YXZ'; // steer (y) then spin (x)
-  let radius = 0.34;
-  if (wheels.length) {
-    const box = new THREE.Box3().setFromObject(wheels[0]);
+  const box = new THREE.Box3();
+  const c = new THREE.Vector3();
+  const spinNodes = [], steerNodes = [];
+  let radius = 0.34, frontZ = 0, frontN = 0;
+  for (const w of wheels) {
+    box.setFromObject(w);
+    box.getCenter(c);
     radius = Math.max(0.12, (box.max.y - box.min.y) / 2);
+    const pivot = new THREE.Group();
+    pivot.rotation.order = 'YXZ'; // steer (y) then spin (x)
+    w.parent.add(pivot);
+    pivot.position.copy(w.parent.worldToLocal(c.clone()));
+    pivot.updateMatrixWorld(true);
+    pivot.attach(w); // keeps the wheel's world transform, pivot at wheel centre
+    spinNodes.push(pivot);
+    if (isFront(w)) { steerNodes.push(pivot); frontZ += c.z; frontN++; }
   }
-  return { spinNodes: wheels, steerNodes: fronts, forwardSign, radius };
+  const forwardSign = frontN && frontZ / frontN < 0 ? -1 : 1;
+  return { spinNodes, steerNodes, forwardSign, radius };
 }
 
 const CAR_LENGTH = 4.4; // meters, GLB models are scaled to this
@@ -214,8 +223,7 @@ function buildPlaceholder(kind = 'sport') {
   };
   const tailMat = new THREE.MeshStandardMaterial({ color: 0x2a0000, emissive: 0xc90f0f });
   const headMat = new THREE.MeshStandardMaterial({ color: 0xcfd6dd, emissive: 0xfff3d6, roughness: 0.2 });
-  registerEmissive(tailMat, 1.3, 3.2);
-  registerEmissive(headMat, 0.55, 5.0);
+  registerEmissive(headMat, 0.55, 5.0); // tail lights are brake-driven in update()
   const chrome = new THREE.MeshStandardMaterial({ color: 0x51565c, metalness: 0.9, roughness: 0.35 });
 
   if (kind === 'saab') {
@@ -292,7 +300,7 @@ function buildPlaceholder(kind = 'sport') {
     }
   }
 
-  return { group: car, wheels, steerPivots, wheelRadius: wr };
+  return { group: car, wheels, steerPivots, wheelRadius: wr, tailMats: [tailMat] };
 }
 
 export function createCar(scene) {
@@ -349,6 +357,7 @@ export function createCar(scene) {
     model.position.z -= center.z / scale;
     model.position.y -= box2.min.y / scale;
 
+    const tailMats = [];
     holder.traverse((o) => {
       if (o.isMesh) {
         o.castShadow = true;
@@ -360,6 +369,11 @@ export function createCar(scene) {
           // daylight: keep headlight/LED emissives from blowing out in bloom
           if (m.emissive && (m.emissive.r + m.emissive.g + m.emissive.b) > 0) {
             m.emissiveIntensity = Math.min(m.emissiveIntensity ?? 1, 0.25);
+          }
+          // tail/brake lights: driven per-frame (night glow + brake boost)
+          if (/tail|brake|lights_red/i.test(m.name || '') && !tailMats.includes(m)) {
+            if (!m.emissive || m.emissive.getHex() === 0) m.emissive = new THREE.Color(0xbb0f0f);
+            tailMats.push(m);
           }
           if (/body.?color|^body$|paint/i.test(m.name || '')) {
             // repaint the shell with our clearcoat livery
@@ -377,6 +391,7 @@ export function createCar(scene) {
       steerPivots: wheelRig.steerNodes,
       wheelRadius: wheelRig.radius * scale,
       dir: wheelRig.forwardSign, // steering sign flips with the model's native facing
+      tailMats,
     };
     root.add(holder);
     console.info('[car] GLB model loaded');
@@ -388,7 +403,13 @@ export function createCar(scene) {
   return {
     root,
     // place the car on the track: p = position, t = tangent, roll = lean, steer = front wheel angle
-    update(p, t, roll, steer, speed, dt) {
+    update(p, t, roll, steer, speed, dt, braking = false) {
+      // tail lights glow at night, flare when braking (any time of day)
+      if (rig.tailMats) {
+        const night = 1 - getDayness();
+        const glow = 0.45 + night * 1.9 + (braking ? 2.6 : 0);
+        for (const m of rig.tailMats) m.emissiveIntensity = glow;
+      }
       root.position.copy(p);
       // Euler XYZ: the z component banks the car around its own forward axis.
       // roll+ = right turn → body leans OUT (left) = negative local z roll.

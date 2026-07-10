@@ -27,8 +27,12 @@ export function registerCustom(fn) {
   fn(1);
 }
 
+let currentDayness = 1;
+export function getDayness() { return currentDayness; }
+
 // nightScale lets a global slider (e.g. headlight intensity) scale a group
 export function applyDayness(d) {
+  currentDayness = d;
   const n = 1 - d;
   for (const e of emissives) e.mat.emissiveIntensity = e.day * d + e.night * n;
   for (const o of opacities) o.mat.opacity = o.day * d + o.night * n;

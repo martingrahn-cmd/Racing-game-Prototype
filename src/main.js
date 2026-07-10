@@ -11,6 +11,7 @@ import { buildTraffic } from './traffic.js';
 import { createDrive, TUNE } from './drive.js';
 import { createAudio } from './audio.js';
 import { createSmoke } from './smoke.js';
+import { createSkidmarks } from './skidmarks.js';
 import { createDayNight } from './daynight.js';
 import { createMinimap } from './minimap.js';
 import GUI from '../vendor/lil-gui.module.min.js';
@@ -73,6 +74,7 @@ const traffic = buildTraffic(scene, curve, length);
 const drive = createDrive(curve, length);
 const audio = createAudio();
 const smoke = createSmoke(scene);
+const skidmarks = createSkidmarks(scene);
 const daynight = createDayNight({ scene, sky, sun, hemi, post });
 const minimap = createMinimap(curve, length);
 
@@ -222,7 +224,7 @@ function updateCamera(dt, time, st) {
   const sf = THREE.MathUtils.clamp((kmh - 90) / 210, 0, 1);
   const back = st?.lookBack ? -1 : 1; // held: camera swings to face rearward
 
-  car.update(carGround, dirVec, roll, steer, speedMs, dt);
+  car.update(carGround, dirVec, roll, steer, speedMs, dt, st ? st.brake > 0.15 : false);
   car.setVisible(camMode !== 1);
 
   if (camMode === 0) { // chase
@@ -408,6 +410,7 @@ function loop(now) {
   extras.update(dt);
   traffic.update(dt);
   smoke.update(dt, st);
+  skidmarks.update(dt, st);
   audio.update(st, dt);
   minimap.update(st ? st.pos : carGround, st ? st.yaw : Math.atan2(dirVec.x, dirVec.z), traffic.cars);
   autoQuality(dt);
