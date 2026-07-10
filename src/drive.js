@@ -185,6 +185,9 @@ export function createDrive(curve, length) {
         roll: THREE.MathUtils.clamp(-lat * 0.012, -0.09, 0.09),
         lookBack: inp.look,
         drifting,
+        slip: Math.abs(lat),          // lateral tire slip, feeds screech + smoke
+        throttle: inp.throttle,
+        brake: inp.brake,
         s: sEst,
       };
     },

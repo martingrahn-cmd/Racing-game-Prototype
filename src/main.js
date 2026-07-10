@@ -9,6 +9,8 @@ import { createCar } from './car.js';
 import { buildExtras } from './extras.js';
 import { buildTraffic } from './traffic.js';
 import { createDrive } from './drive.js';
+import { createAudio } from './audio.js';
+import { createSmoke } from './smoke.js';
 
 // ------------------------------------------------------------ renderer
 const canvas = document.getElementById('game');
@@ -66,6 +68,13 @@ const car = createCar(scene);
 const extras = buildExtras(scene, renderer, curve, length, cornerSpans);
 const traffic = buildTraffic(scene, curve, length);
 const drive = createDrive(curve, length);
+const audio = createAudio();
+const smoke = createSmoke(scene);
+// browsers unlock audio on a user gesture; any of these will do
+for (const ev of ['keydown', 'pointerdown', 'gamepadconnected']) {
+  addEventListener(ev, () => audio.resume());
+}
+addEventListener('keydown', (e) => { if (e.code === 'KeyM') audio.toggleMute(); });
 
 // image-based lighting from the generated sky (gives glass its sheen)
 {
@@ -312,6 +321,7 @@ function loop(now) {
   perfTime += dt;
 
   const st = drive.update(dt, sPos, traffic.cars);
+  if (st) audio.resume(); // gamepad-only players never fire DOM gestures
   if (drive.consumeCameraTap()) cycleCamera();
 
   // attract mode: auto-cycle cameras unless the user recently chose one
@@ -325,6 +335,8 @@ function loop(now) {
   const kmh = updateCamera(dt, perfTime, st);
   extras.update(dt);
   traffic.update(dt);
+  smoke.update(dt, st);
+  audio.update(st, dt);
   autoQuality(dt);
   if (postEnabled) {
     const sf = (kmh - 90) / 210;
