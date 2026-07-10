@@ -30,8 +30,11 @@ Spelet startar i *attract mode* — **gasa för att ta över bilen**.
 | Broms / back | `↓` / `S` | LT (vänster avtryckare) |
 | Styrning | `←→` / `A D` | Vänster spak (+ d-pad) |
 | Handbroms (sladd!) | `Mellanslag` | A / Kryss |
-| Titta bakåt | `R` | B / Cirkel |
+| Titta bakåt | `B` | B / Cirkel |
+| Tuta | `H` | X / Fyrkant |
+| Reset (ställ på vägen) | `R` | Back / Select |
 | Byt kamera | `C` | Y / Triangel |
+| Ljud av/på | `M` | — |
 
 Handkontrollen har vibration vid väggträff och trafikkontakt. Utan input
 klipper attract-läget mellan kamerorna själv.

@@ -27,15 +27,18 @@ export function createDrive(curve, length) {
 
   let cameraTapped = false; // edge-triggered camera cycle from the pad
   let camHeld = false;
+  let resetHeld = false;
 
   function readInput() {
-    let steer = 0, throttle = 0, brake = 0, hand = false, look = false;
+    let steer = 0, throttle = 0, brake = 0, hand = false, look = false, horn = false, reset = false;
     if (keys.has('ArrowLeft') || keys.has('KeyA')) steer -= 1;
     if (keys.has('ArrowRight') || keys.has('KeyD')) steer += 1;
     if (keys.has('ArrowUp') || keys.has('KeyW')) throttle = 1;
     if (keys.has('ArrowDown') || keys.has('KeyS')) brake = 1;
     if (keys.has('Space')) hand = true;
-    if (keys.has('KeyR')) look = true;
+    if (keys.has('KeyB')) look = true;
+    if (keys.has('KeyH')) horn = true;
+    let resetNow = keys.has('KeyR');
 
     const pad = padIndex !== null ? navigator.getGamepads()[padIndex] : null;
     if (pad) {
@@ -45,6 +48,8 @@ export function createDrive(curve, length) {
       brake = Math.max(brake, pad.buttons[6]?.value ?? 0);               // LT
       hand = hand || !!pad.buttons[0]?.pressed;                          // A / Cross
       look = look || !!pad.buttons[1]?.pressed;                          // B / Circle
+      horn = horn || !!pad.buttons[2]?.pressed;                          // X / Square
+      resetNow = resetNow || !!pad.buttons[8]?.pressed;                  // Back / Select
       const camBtn = !!pad.buttons[3]?.pressed;                          // Y / Triangle
       if (camBtn && !camHeld) cameraTapped = true;
       camHeld = camBtn;
@@ -52,7 +57,9 @@ export function createDrive(curve, length) {
       if (pad.buttons[14]?.pressed) steer -= 1;
       if (pad.buttons[15]?.pressed) steer += 1;
     }
-    return { steer: THREE.MathUtils.clamp(steer, -1, 1), throttle, brake, hand, look };
+    reset = resetNow && !resetHeld; // edge-trigger
+    resetHeld = resetNow;
+    return { steer: THREE.MathUtils.clamp(steer, -1, 1), throttle, brake, hand, look, horn, reset };
   }
 
   function rumble(strong, weak, ms) {
@@ -108,6 +115,15 @@ export function createDrive(curve, length) {
       if (!playing) {
         if (inp.throttle > 0.15 || inp.brake > 0.15 || Math.abs(inp.steer) > 0.4) takeControl(attractS);
         else return null;
+      }
+
+      // reset: back onto the centreline, facing forward, at walking pace
+      if (inp.reset) {
+        refineS();
+        const { p, t } = frameAt(curve, length, sEst);
+        pos.copy(p); pos.y = 0;
+        yaw = Math.atan2(t.x, t.z);
+        vel.set(t.x, 0, t.z).multiplyScalar(3);
       }
 
       heading.set(Math.sin(yaw), 0, Math.cos(yaw));
@@ -188,6 +204,7 @@ export function createDrive(curve, length) {
         slip: Math.abs(lat),          // lateral tire slip, feeds screech + smoke
         throttle: inp.throttle,
         brake: inp.brake,
+        horn: inp.horn,
         s: sEst,
       };
     },
