@@ -52,8 +52,30 @@ URL-parametrar för felsökning: `?s=520&cam=2&speed=4` (position på banan, kam
 - Adaptiv kvalitet: sänker pixel ratio och skuggupplösning automatiskt om
   bilduppdateringen sjunker, så det rullar även på mobil
 
+## Byt ut bilen mot en riktig modell
+
+En procedurell platshållarbil kör banan direkt. För snyggare bil: ladda ner en fri
+modell och lägg den som **`assets/car.glb`** — spelet hittar den automatiskt,
+skalar den till rätt längd och ställer den på vägen. Pekar modellen åt fel håll,
+justera med URL-parametern `?carRot=90` (eller 180/270).
+
+Bra gratiskällor (GLB/glTF, testade licenser):
+
+| Källa | Licens | Kommentar |
+|---|---|---|
+| [Kenney — Car Kit](https://kenney.nl/assets/car-kit) | CC0 | 40+ bilar, glTF ingår, perfekt stilnivå |
+| [Kenney — Racing Kit](https://kenney.nl/assets/racing-kit) | CC0 | Racingbilar + banrekvisita |
+| [Quaternius — Cars Pack](https://quaternius.com/packs/cars.html) | CC0 | 8 bilar (sport, taxi, polis, SUV) |
+| [Quaternius Cars Bundle på Poly Pizza](https://poly.pizza/bundle/Cars-Bundle-FE5IWe6OMk) | CC0 | Samma paket, direkt GLB-nedladdning |
+| [Poly Pizza — sök "car"](https://poly.pizza/) | CC0/CC-BY | 1000-tals modeller, filtrera på licens |
+| [Sketchfab — downloadable](https://sketchfab.com/search?features=downloadable&licenses=322a749bcfa841b29dff1e8a1bb74b0b&q=car&type=models) | CC0-filter | Högre detaljnivå, kolla polycount |
+
+CC0 = public domain: fritt att använda, ändra och committa i repot utan attribution.
+(CC-BY kräver att upphovspersonen krediteras, t.ex. här i README.)
+
 ## Nästa steg
 
-- Bilen (spelarfordon med fysik/styrning)
+- Riktig bilmodell enligt ovan
+- Fysik/styrning (spelarkontroll istället för attract mode)
 - Fler bilar på skärmen (motståndare/trafik)
 - Ljud, HUD-varvtider, natt/skymningsläge

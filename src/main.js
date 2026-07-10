@@ -5,6 +5,7 @@ import { buildTrack, frameAt } from './track.js';
 import { buildCity } from './city.js';
 import { buildSky, SUN_DIR } from './sky.js';
 import { createPost } from './post.js';
+import { createCar } from './car.js';
 
 // ------------------------------------------------------------ renderer
 const canvas = document.getElementById('game');
@@ -51,6 +52,7 @@ scene.add(hemi);
 const sky = buildSky(scene);
 const { curve, length } = buildTrack(scene);
 buildCity(scene, curve, length);
+const car = createCar(scene);
 
 // image-based lighting from the generated sky (gives glass its sheen)
 {
@@ -79,7 +81,7 @@ let autoTimer = 0;
 let tracksideS = null;
 
 const V = () => new THREE.Vector3();
-const carP = V(), aheadP = V(), tmp = V(), camPos = V(), lookP = V();
+const carP = V(), carGround = V(), aheadP = V(), tmp = V(), camPos = V(), lookP = V();
 let smoothedPos = null, smoothedLook = null;
 
 function pointAt(s, out) {
@@ -106,14 +108,21 @@ function updateCamera(dt, time) {
   sPos = (sPos + v * dt) % length;
 
   pointAt(sPos, carP).y += 0.55;
+  pointAt(sPos, carGround).y += 0.035;
   const sf = (kmh - 90) / 210; // 0..1 speed factor
 
   const fr = frameAt(curve, length, sPos);
-  const roll = THREE.MathUtils.clamp(-signedCurvature(sPos) * 1.6, -0.10, 0.10);
+  const curvature = signedCurvature(sPos);
+  const roll = THREE.MathUtils.clamp(-curvature * 1.6, -0.10, 0.10);
+
+  // the car itself (hidden in bumper view so it doesn't block the lens)
+  const steer = THREE.MathUtils.clamp(curvature * 2.2, -0.45, 0.45);
+  car.update(carGround, fr.t, roll, steer, v, dt);
+  car.setVisible(camMode !== 1);
 
   if (camMode === 0) { // chase
-    pointAt(sPos - 8.5, camPos).y += 2.6;
-    pointAt(sPos + 20, lookP).y += 1.2;
+    pointAt(sPos - 7.2, camPos).y += 1.9;
+    pointAt(sPos + 16, lookP).y += 1.0;
   } else if (camMode === 1) { // bumper
     camPos.copy(carP); camPos.y += 0.65;
     camPos.addScaledVector(fr.r, roll * 3);
