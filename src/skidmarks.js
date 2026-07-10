@@ -49,6 +49,7 @@ export function createSkidmarks(scene) {
   scene.add(mesh);
 
   let cursor = 0;
+  let burnTimer = 0;
   const last = [null, null]; // per rear wheel: {c: Vector3, l: Vector3, r: Vector3}
   const c = new THREE.Vector3(), right = new THREE.Vector3();
   const segDir = new THREE.Vector3(), perp = new THREE.Vector3();
@@ -69,6 +70,30 @@ export function createSkidmarks(scene) {
   return {
     update(dt, st) {
       const marking = st && (st.slip > 2.4 || (st.throttle > 0.6 && st.speed < 7));
+
+      // standing burnout: no travel, so grow a rubber patch under the tires
+      if (marking && st.speed < 2.5) {
+        burnTimer -= dt;
+        if (burnTimer <= 0) {
+          burnTimer = 0.13;
+          right.set(-st.heading.z, 0, st.heading.x);
+          for (const side of [-1, 1]) {
+            c.copy(st.pos)
+              .addScaledVector(st.heading, -1.35 + (Math.random() - 0.5) * 0.25)
+              .addScaledVector(right, side * 0.8 + (Math.random() - 0.5) * 0.06);
+            c.y = 0.04;
+            const h = st.heading, half = 0.2;
+            const rw = TIRE_W / 2;
+            emit(
+              { l: c.clone().addScaledVector(h, -half).addScaledVector(right, rw),
+                r: c.clone().addScaledVector(h, -half).addScaledVector(right, -rw) },
+              { l: c.clone().addScaledVector(h, half).addScaledVector(right, rw),
+                r: c.clone().addScaledVector(h, half).addScaledVector(right, -rw) },
+            );
+          }
+        }
+      }
+
       if (marking) {
         right.set(-st.heading.z, 0, st.heading.x);
         for (const side of [0, 1]) {

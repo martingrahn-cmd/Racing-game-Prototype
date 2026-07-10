@@ -18,7 +18,7 @@ export const TUNE = {
   grip: 6.5,
   driftGrip: 1.3,
   steer: 2.4,
-  driftSteer: 1.55,
+  driftSteer: 2.0,
 };
 
 export function createDrive(curve, length) {
@@ -149,7 +149,10 @@ export function createDrive(curve, length) {
       // Rotation carries angular momentum and is scaled by TOTAL speed, not
       // forward speed — so a handbrake flick swings past 90° into a full spin.
       const steerAuthority = TUNE.steer - TUNE.steer * 0.65 * Math.min(Math.abs(fwdSpeed) / 45, 1);
-      if (Math.abs(fwdSpeed) > 1) lastDir = Math.sign(fwdSpeed);
+      // direction memory is FROZEN while the handbrake is on: forward speed
+      // flips sign as the car passes 90°, and updating here reversed the spin
+      // at exactly that point (the old "90° wall")
+      if (!inp.hand && Math.abs(fwdSpeed) > 1) lastDir = Math.sign(fwdSpeed);
       const targetYawVel = -inp.steer * steerAuthority * (inp.hand ? TUNE.driftSteer : 1)
         * lastDir * Math.min(speed / 6, 1);
       const response = inp.hand ? 3.2 : 10; // sliding tires hold their rotation

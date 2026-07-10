@@ -41,7 +41,8 @@ function setDirectToneMapping(on) {
 // software/mobile GPUs can drop the context under load — recover by reloading
 canvas.addEventListener('webglcontextlost', (e) => {
   e.preventDefault();
-  location.reload();
+  console.warn('[gl] context lost');
+  if (!new URLSearchParams(location.search).has('noreload')) location.reload();
 });
 
 const scene = new THREE.Scene();
