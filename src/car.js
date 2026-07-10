@@ -404,10 +404,11 @@ export function createCar(scene) {
     root,
     // place the car on the track: p = position, t = tangent, roll = lean, steer = front wheel angle
     update(p, t, roll, steer, speed, dt, braking = false) {
-      // tail lights glow at night, flare when braking (any time of day)
+      // tail lights: soft glow at night, hard flare when braking. The night
+      // base stays low so the brake flare survives bloom saturation.
       if (rig.tailMats) {
         const night = 1 - getDayness();
-        const glow = 0.45 + night * 1.9 + (braking ? 2.6 : 0);
+        const glow = braking ? 5.5 : 0.45 + night * 1.15;
         for (const m of rig.tailMats) m.emissiveIntensity = glow;
       }
       root.position.copy(p);
