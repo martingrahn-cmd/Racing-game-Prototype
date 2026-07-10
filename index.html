@@ -78,6 +78,14 @@
   }
   #controls button:active { background: rgba(255,217,74,0.5); }
 
+  #minimap {
+    position: fixed; left: 18px; bottom: max(52px, calc(env(safe-area-inset-bottom) + 40px));
+    width: 150px; height: 150px; pointer-events: none;
+    background: rgba(10,14,20,0.35); border-radius: 50%;
+    backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px);
+  }
+  @media (max-width: 700px) { #minimap { width: 110px; height: 110px; } }
+
   #loader {
     position: fixed; inset: 0; z-index: 10;
     background: #0b0d10; display: flex; align-items: center; justify-content: center;
@@ -99,6 +107,8 @@
 <div class="hud" id="camName">CHASE</div>
 <div class="hud" id="hint">[↑↓←→/WASD] KÖR &nbsp;·&nbsp; [SPACE] HANDBROMS &nbsp;·&nbsp; [B] BAKÅT &nbsp;·&nbsp; [H] TUTA &nbsp;·&nbsp; [R] RESET &nbsp;·&nbsp; [C] KAMERA</div>
 <div class="hud" id="prompt"></div>
+
+<canvas id="minimap" width="150" height="150"></canvas>
 
 <div id="controls">
   <button id="btnCam" title="Byt kamera">📷</button>

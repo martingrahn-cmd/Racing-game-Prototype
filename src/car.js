@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from '../vendor/loaders/GLTFLoader.js';
 import { DRACOLoader } from '../vendor/loaders/DRACOLoader.js';
 import { makeContactShadowTexture } from './textures.js';
+import { registerEmissive, registerLight } from './night.js';
 
 export function makeGLTFLoader() {
   const draco = new DRACOLoader();
@@ -211,8 +212,10 @@ function buildPlaceholder(kind = 'sport') {
     car.add(m);
     return m;
   };
-  const tailMat = new THREE.MeshStandardMaterial({ color: 0x2a0000, emissive: 0xc90f0f, emissiveIntensity: 1.3 });
-  const headMat = new THREE.MeshStandardMaterial({ color: 0xcfd6dd, emissive: 0xaec4dd, emissiveIntensity: 0.55, roughness: 0.2 });
+  const tailMat = new THREE.MeshStandardMaterial({ color: 0x2a0000, emissive: 0xc90f0f });
+  const headMat = new THREE.MeshStandardMaterial({ color: 0xcfd6dd, emissive: 0xfff3d6, roughness: 0.2 });
+  registerEmissive(tailMat, 1.3, 3.2);
+  registerEmissive(headMat, 0.55, 5.0);
   const chrome = new THREE.MeshStandardMaterial({ color: 0x51565c, metalness: 0.9, roughness: 0.35 });
 
   if (kind === 'saab') {
@@ -295,6 +298,17 @@ function buildPlaceholder(kind = 'sport') {
 export function createCar(scene) {
   const root = new THREE.Group();
   scene.add(root);
+
+  // headlight beams: registered so they only exist after dark
+  for (const sx of [-0.55, 0.55]) {
+    const spot = new THREE.SpotLight(0xfff0d0, 0, 70, 0.46, 0.55, 1.0);
+    spot.position.set(sx, 0.72, 2.0);
+    const target = new THREE.Object3D();
+    target.position.set(sx * 2.2, 0.1, 30);
+    root.add(spot, target);
+    spot.target = target;
+    registerLight(spot, 0, 300);
+  }
 
   // ?car=glb (default, assets/car.glb) | saab (SVEN 9000) | proto (sports coupe)
   const choice = new URLSearchParams(location.search).get('car') ?? 'glb';

@@ -3,8 +3,8 @@
 import * as THREE from 'three';
 import { frameAt } from './track.js';
 import { makeGLTFLoader, rigWheels } from './car.js';
-import { makeContactShadowTexture } from './textures.js';
-import { mulberry32 } from './textures.js';
+import { makeContactShadowTexture, mulberry32 } from './textures.js';
+import { registerEmissive } from './night.js';
 
 const MODELS = [
   'assets/traffic/taxi.glb',
@@ -27,6 +27,13 @@ export function buildTraffic(scene, curve, length) {
   });
   const shadowGeo = new THREE.PlaneGeometry(2.4, 4.6);
   shadowGeo.rotateX(-Math.PI / 2);
+
+  // shared glowing head/tail lights, visible after dark
+  const headGlow = new THREE.MeshStandardMaterial({ color: 0x1a1a14, emissive: 0xffedb0 });
+  const tailGlow = new THREE.MeshStandardMaterial({ color: 0x1a0808, emissive: 0xd91414 });
+  registerEmissive(headGlow, 0, 4.0);
+  registerEmissive(tailGlow, 0, 2.6);
+  const lightGeo = new THREE.BoxGeometry(0.28, 0.1, 0.05);
 
   const loader = makeGLTFLoader();
   MODELS.forEach((path, mi) => {
@@ -62,6 +69,13 @@ export function buildTraffic(scene, curve, length) {
         blob.position.y = 0.06;
         blob.renderOrder = 2;
         group.add(blob);
+        for (const sx of [-0.55, 0.55]) {
+          const hl = new THREE.Mesh(lightGeo, headGlow);
+          hl.position.set(sx, 0.55, 2.02);
+          const tl = new THREE.Mesh(lightGeo, tailGlow);
+          tl.position.set(sx, 0.55, -2.02);
+          group.add(hl, tl);
+        }
         scene.add(group);
 
         const oncoming = rng() < 0.45; // left lane meets the player head-on

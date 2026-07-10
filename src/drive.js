@@ -11,6 +11,16 @@ const TRACK_HALF = 8.3;        // fence corridor half-width
 const MAX_SPEED = 61;          // m/s ≈ 220 km/h
 const MAX_REVERSE = 9;
 
+// handling parameters, exposed so the debug GUI can tune them live
+export const TUNE = {
+  accel: 13.5,
+  brakeForce: 24,
+  grip: 6.5,
+  driftGrip: 1.3,
+  steer: 2.4,
+  driftSteer: 1.55,
+};
+
 export function createDrive(curve, length) {
   // ---------------- input ----------------
   const keys = new Set();
@@ -131,16 +141,16 @@ export function createDrive(curve, length) {
       const speed = vel.length();
 
       // steering: full lock at low speed, tightening down as speed rises
-      const steerAuthority = 2.4 - 1.55 * Math.min(Math.abs(fwdSpeed) / 45, 1);
-      let yawRate = inp.steer * steerAuthority * (inp.hand ? 1.55 : 1);
+      const steerAuthority = TUNE.steer - TUNE.steer * 0.65 * Math.min(Math.abs(fwdSpeed) / 45, 1);
+      let yawRate = inp.steer * steerAuthority * (inp.hand ? TUNE.driftSteer : 1);
       if (Math.abs(fwdSpeed) > 0.4) yaw += yawRate * Math.sign(fwdSpeed) * Math.min(Math.abs(fwdSpeed) / 6, 1) * dt;
       heading.set(Math.sin(yaw), 0, Math.cos(yaw));
 
       // throttle / brake / reverse
       let acc = 0;
-      if (inp.throttle > 0) acc += inp.throttle * (13.5 - 9 * Math.max(fwdSpeed, 0) / MAX_SPEED);
+      if (inp.throttle > 0) acc += inp.throttle * (TUNE.accel - TUNE.accel * 0.67 * Math.max(fwdSpeed, 0) / MAX_SPEED);
       if (inp.brake > 0) {
-        if (fwdSpeed > 0.6) acc -= inp.brake * 24;
+        if (fwdSpeed > 0.6) acc -= inp.brake * TUNE.brakeForce;
         else acc -= inp.brake * 7; // reverse
       }
       vel.addScaledVector(heading, acc * dt);
@@ -148,7 +158,7 @@ export function createDrive(curve, length) {
       // grip: bleed lateral velocity (loose when the handbrake is on)
       right.set(heading.z, 0, -heading.x);
       const lat = vel.dot(right);
-      const grip = inp.hand ? 1.3 : 6.5;
+      const grip = inp.hand ? TUNE.driftGrip : TUNE.grip;
       vel.addScaledVector(right, -lat * Math.min(grip * dt, 1));
       // drag + handbrake scrub
       vel.multiplyScalar(Math.max(0, 1 - (0.25 + (inp.hand ? 1.0 : 0)) * dt * 0.4));

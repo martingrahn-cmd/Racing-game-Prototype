@@ -215,14 +215,25 @@ function facadeSet(bg, wallRough = 200) {
   const c = canvas(512, 512), x = c.getContext('2d');
   const hc = canvas(512, 512), hx = hc.getContext('2d');
   const rc = canvas(512, 512), rx = rc.getContext('2d');
+  const ec = canvas(512, 512), ex = ec.getContext('2d'); // night-light emissive
   x.fillStyle = bg; x.fillRect(0, 0, 512, 512);
   hx.fillStyle = gray(220); hx.fillRect(0, 0, 512, 512);
   rx.fillStyle = gray(wallRough); rx.fillRect(0, 0, 512, 512);
-  return { c, x, hc, hx, rc, rx };
+  ex.fillStyle = '#000000'; ex.fillRect(0, 0, 512, 512);
+  return { c, x, hc, hx, rc, rx, ec, ex };
 }
 
+const NIGHT_WINDOW_COLORS = ['#ffd27a', '#ffe9b8', '#fff4d8', '#bcd6ff', '#ffc9a0'];
+
 function paintWindow(set, px, py, ww, wh, rng, glassTopBias, glassRough = 45) {
-  const { x, hx, rx } = set;
+  const { x, hx, rx, ex } = set;
+  // ~30% of windows are lit after dark
+  if (rng() < 0.3) {
+    ex.fillStyle = NIGHT_WINDOW_COLORS[Math.floor(rng() * NIGHT_WINDOW_COLORS.length)];
+    ex.globalAlpha = 0.55 + rng() * 0.45;
+    ex.fillRect(px, py, ww, wh);
+    ex.globalAlpha = 1;
+  }
   const refl = 0.35 + rng() * 0.5;
   const g = x.createLinearGradient(px, py, px, py + wh);
   const top = Math.floor(120 + refl * 110 * glassTopBias);
@@ -243,7 +254,7 @@ function paintWindow(set, px, py, ww, wh, rng, glassTopBias, glassRough = 45) {
 
 // Ground-floor storefronts: dark glazing, awnings, signs (canvas bottom = v0).
 function paintStorefront(set, w, h, rng, band = 62) {
-  const { x, hx, rx } = set;
+  const { x, hx, rx, ex } = set;
   const y0 = h - band;
   x.fillStyle = '#22262c'; x.fillRect(0, y0, w, band);
   hx.fillStyle = gray(60); hx.fillRect(0, y0, w, band);
@@ -255,6 +266,11 @@ function paintStorefront(set, w, h, rng, band = 62) {
     const sx = i * sw;
     x.fillStyle = `rgba(255,236,190,${0.10 + rng() * 0.25})`;
     x.fillRect(sx + 6, y0 + 18, sw - 12, band - 24);
+    // shops glow warmly after dark
+    ex.fillStyle = NIGHT_WINDOW_COLORS[Math.floor(rng() * 3)];
+    ex.globalAlpha = 0.8;
+    ex.fillRect(sx + 6, y0 + 18, sw - 12, band - 24);
+    ex.globalAlpha = 1;
     x.fillStyle = awning[Math.floor(rng() * awning.length)];
     x.fillRect(sx + 3, y0, sw - 6, 9);
     hx.fillStyle = gray(255); hx.fillRect(sx + 3, y0, sw - 6, 9); // awning sticks out
@@ -268,6 +284,7 @@ function finishFacade(set, normalStrength = 2.2) {
     map: toTexture(set.c),
     normalMap: normalFromHeight(set.hc, normalStrength),
     roughnessMap: toTexture(set.rc, { srgb: false }),
+    emissiveMap: toTexture(set.ec),
   };
 }
 
@@ -468,6 +485,17 @@ export function makeSkidTexture() {
     x.fillRect(cx - 7, 0, 14, 256);
   }
   return toTexture(c); // wraps: skids fade in/out repeatedly along the span
+}
+
+export function makeGlowPoolTexture() { // white radial falloff for additive light pools
+  const c = canvas(128, 128), x = c.getContext('2d');
+  const g = x.createRadialGradient(64, 64, 4, 64, 64, 62);
+  g.addColorStop(0, 'rgba(255,255,255,0.9)');
+  g.addColorStop(0.4, 'rgba(255,255,255,0.35)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g;
+  x.fillRect(0, 0, 128, 128);
+  return toTexture(c, { repeat: false });
 }
 
 export function makeContactShadowTexture() {

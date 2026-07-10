@@ -172,5 +172,5 @@ export function createPost(renderer) {
     sceneRT.dispose(); bloomA.dispose(); bloomB.dispose();
   }
 
-  return { render, setSize, dispose };
+  return { render, setSize, dispose, uniforms: compMat.uniforms };
 }

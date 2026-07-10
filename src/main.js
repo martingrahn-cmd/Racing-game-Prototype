@@ -8,9 +8,12 @@ import { createPost } from './post.js';
 import { createCar } from './car.js';
 import { buildExtras } from './extras.js';
 import { buildTraffic } from './traffic.js';
-import { createDrive } from './drive.js';
+import { createDrive, TUNE } from './drive.js';
 import { createAudio } from './audio.js';
 import { createSmoke } from './smoke.js';
+import { createDayNight } from './daynight.js';
+import { createMinimap } from './minimap.js';
+import GUI from '../vendor/lil-gui.module.min.js';
 
 // ------------------------------------------------------------ renderer
 const canvas = document.getElementById('game');
@@ -70,6 +73,35 @@ const traffic = buildTraffic(scene, curve, length);
 const drive = createDrive(curve, length);
 const audio = createAudio();
 const smoke = createSmoke(scene);
+const daynight = createDayNight({ scene, sky, sun, hemi, post });
+const minimap = createMinimap(curve, length);
+
+// debug panel (G) — the vibe-coder's control room
+const gui = new GUI({ title: 'APEX DEBUG' });
+{
+  const fCycle = gui.addFolder('Dygn');
+  fCycle.add(daynight.params, 'auto').name('auto-cykel');
+  fCycle.add(daynight.params, 'timeOfDay', 0, 1, 0.001).name('tid (0=gryning)').listen();
+  fCycle.add(daynight.params, 'cycleSec', 30, 3600, 10).name('cykel (s)');
+  const fNight = gui.addFolder('Natt');
+  fNight.add(daynight.params, 'moonIntensity', 0, 1, 0.01).name('månljus');
+  fNight.add(daynight.params, 'nightExposure', 0.5, 1.6, 0.01).name('exponering');
+  if (post) fNight.add(post.uniforms.bloomStrength, 'value', 0, 2.5, 0.05).name('bloom');
+  const fDrive = gui.addFolder('Körning');
+  fDrive.add(TUNE, 'accel', 5, 30, 0.5);
+  fDrive.add(TUNE, 'brakeForce', 8, 40, 1).name('broms');
+  fDrive.add(TUNE, 'grip', 2, 12, 0.1).name('grepp');
+  fDrive.add(TUNE, 'driftGrip', 0.4, 4, 0.1).name('sladdgrepp');
+  fDrive.add(TUNE, 'steer', 1, 4, 0.05).name('styrutslag');
+  gui.hide();
+}
+let guiVisible = false;
+addEventListener('keydown', (e) => {
+  if (e.code === 'KeyG') {
+    guiVisible = !guiVisible;
+    guiVisible ? gui.show() : gui.hide();
+  }
+});
 // browsers unlock audio on a user gesture; any of these will do
 for (const ev of ['keydown', 'pointerdown', 'gamepadconnected']) {
   addEventListener(ev, () => audio.resume());
@@ -332,11 +364,13 @@ function loop(now) {
     tracksideS = null;
     smoothedPos = null;
   }
+  daynight.update(dt);
   const kmh = updateCamera(dt, perfTime, st);
   extras.update(dt);
   traffic.update(dt);
   smoke.update(dt, st);
   audio.update(st, dt);
+  minimap.update(st ? st.pos : carGround, st ? st.yaw : Math.atan2(dirVec.x, dirVec.z), traffic.cars);
   autoQuality(dt);
   if (postEnabled) {
     const sf = (kmh - 90) / 210;

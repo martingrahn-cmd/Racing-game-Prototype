@@ -5,6 +5,7 @@ import {
   makeRoofTexture, makeGroundTexture, makeAdsAtlas, makeContactShadowTexture, mulberry32,
 } from './textures.js';
 import { frameAt, mergeGeoms, ROAD_HALF } from './track.js';
+import { registerEmissive } from './night.js';
 
 const DOWNTOWN = new THREE.Vector2(-30, 60);
 
@@ -174,9 +175,11 @@ export function buildCity(scene, curve, length) {
     const f = spec.tex();
     const facadeMat = new THREE.MeshStandardMaterial({
       map: f.map, normalMap: f.normalMap, roughnessMap: f.roughnessMap,
+      emissiveMap: f.emissiveMap, emissive: 0xffffff,
       normalScale: new THREE.Vector2(0.8, 0.8),
       roughness: spec.rough, metalness: spec.metal,
     });
+    registerEmissive(facadeMat, 0, 1.25); // windows light up after dark
     const roofMat = new THREE.MeshStandardMaterial({ map: roofTex, roughness: 0.95 });
     const mesh = new THREE.InstancedMesh(spec.geo(), [facadeMat, roofMat], list.length);
     mesh.frustumCulled = false;
@@ -236,9 +239,11 @@ export function buildCity(scene, curve, length) {
     const steelMesh = new THREE.Mesh(mergeGeoms(steel),
       new THREE.MeshStandardMaterial({ color: 0x2f333a, roughness: 0.6, metalness: 0.4 }));
     scene.add(steelMesh);
-    scene.add(new THREE.Mesh(mergeGeoms(panels), new THREE.MeshStandardMaterial({
-      map: adsTex, emissiveMap: adsTex, emissive: 0xffffff, emissiveIntensity: 0.35, roughness: 0.6,
-    })));
+    const roofAdMat = new THREE.MeshStandardMaterial({
+      map: adsTex, emissiveMap: adsTex, emissive: 0xffffff, roughness: 0.6,
+    });
+    registerEmissive(roofAdMat, 0.35, 2.4); // rooftop neon at night
+    scene.add(new THREE.Mesh(mergeGeoms(panels), roofAdMat));
   }
 
   // --- wall ads (merged planes with atlas UVs, slightly emissive) -------------
@@ -254,11 +259,11 @@ export function buildCity(scene, curve, length) {
       g.translate(b.x, b.y, b.z);
       return g;
     });
-    const adMesh = new THREE.Mesh(mergeGeoms(adGeos), new THREE.MeshStandardMaterial({
-      map: adsTex, emissiveMap: adsTex, emissive: 0xffffff, emissiveIntensity: 0.42,
-      roughness: 0.55,
-    }));
-    scene.add(adMesh);
+    const wallAdMat = new THREE.MeshStandardMaterial({
+      map: adsTex, emissiveMap: adsTex, emissive: 0xffffff, roughness: 0.55,
+    });
+    registerEmissive(wallAdMat, 0.42, 2.2);
+    scene.add(new THREE.Mesh(mergeGeoms(adGeos), wallAdMat));
   }
 
   // --- trees ----------------------------------------------------------------

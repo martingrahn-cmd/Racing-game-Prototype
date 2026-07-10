@@ -2,8 +2,10 @@
 import * as THREE from 'three';
 import {
   makeRoadTexture, makeKerbTexture, makeConcreteKerbTexture, makeSidewalkTexture,
-  makeFenceTexture, makeBannerAtlas, makeManholeTexture, makeSkidTexture, mulberry32,
+  makeFenceTexture, makeBannerAtlas, makeManholeTexture, makeSkidTexture,
+  makeGlowPoolTexture, mulberry32,
 } from './textures.js';
+import { registerEmissive, registerOpacity } from './night.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 
@@ -302,9 +304,27 @@ export function buildTrack(scene) {
   const lamps = new THREE.InstancedMesh(lampGeo, lampMat, lampCount);
   lamps.frustumCulled = false;
   lamps.castShadow = true;
+  // glowing head + warm pool of light on the ground, both driven by nightfall
+  const lampGlowMat = new THREE.MeshStandardMaterial({ color: 0x2a2416, emissive: 0xffe6b0 });
+  registerEmissive(lampGlowMat, 0, 3.2);
+  const glowGeo = new THREE.BoxGeometry(0.86, 0.1, 0.28);
+  const glows = new THREE.InstancedMesh(glowGeo, lampGlowMat, lampCount);
+  glows.frustumCulled = false;
+  const poolMat = new THREE.MeshBasicMaterial({
+    map: makeGlowPoolTexture(), transparent: true, depthWrite: false,
+    color: 0xffd9a0, blending: THREE.AdditiveBlending,
+    polygonOffset: true, polygonOffsetFactor: -2,
+  });
+  registerOpacity(poolMat, 0, 0.5);
+  const poolGeo = new THREE.PlaneGeometry(7.5, 7.5);
+  poolGeo.rotateX(-Math.PI / 2);
+  const pools = new THREE.InstancedMesh(poolGeo, poolMat, lampCount);
+  pools.frustumCulled = false;
+  pools.renderOrder = 3;
   {
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
+    const headOff = new THREE.Vector3();
     let i = 0;
     for (let s = 0; s < length - lampSpacing / 2 && i < lampCount; s += lampSpacing) {
       const side = (i % 2 === 0) ? 1 : -1;
@@ -312,12 +332,21 @@ export function buildTrack(scene) {
       const yaw = Math.atan2(t.x, t.z) + (side > 0 ? 0 : Math.PI);
       q.setFromAxisAngle(UP, yaw + Math.PI / 2);
       m.makeRotationFromQuaternion(q);
-      m.setPosition(p.x + r.x * side * (ROAD_HALF + 2.4), p.y + 0.16, p.z + r.z * side * (ROAD_HALF + 2.4));
-      lamps.setMatrixAt(i++, m);
+      const bx = p.x + r.x * side * (ROAD_HALF + 2.4);
+      const bz = p.z + r.z * side * (ROAD_HALF + 2.4);
+      m.setPosition(bx, p.y + 0.16, bz);
+      lamps.setMatrixAt(i, m);
+      // lamp head sits 2.45 m inboard along the arm (local -x after the yaw)
+      headOff.set(-2.45, 0, 0).applyQuaternion(q);
+      m.setPosition(bx + headOff.x, p.y + 6.58, bz + headOff.z);
+      glows.setMatrixAt(i, m);
+      m.makeTranslation(bx + headOff.x, p.y + 0.07, bz + headOff.z);
+      pools.setMatrixAt(i, m);
+      i++;
     }
-    lamps.count = i;
+    lamps.count = glows.count = pools.count = i;
   }
-  scene.add(lamps);
+  scene.add(lamps, glows, pools);
 
   // --- sponsor gantries -----------------------------------------------------
   const gantrySteel = [];
@@ -357,8 +386,11 @@ export function buildTrack(scene) {
   gantryMesh.castShadow = true;
   scene.add(gantryMesh);
 
-  const bannerMesh = new THREE.Mesh(mergeGeoms(bannerGeos),
-    new THREE.MeshStandardMaterial({ map: bannerAtlas, roughness: 0.75 }));
+  const bannerMat = new THREE.MeshStandardMaterial({
+    map: bannerAtlas, emissiveMap: bannerAtlas, emissive: 0xffffff, roughness: 0.75,
+  });
+  registerEmissive(bannerMat, 0, 1.5); // gantry banners glow like signage at night
+  const bannerMesh = new THREE.Mesh(mergeGeoms(bannerGeos), bannerMat);
   scene.add(bannerMesh);
 
   // start/finish line painted on the road
