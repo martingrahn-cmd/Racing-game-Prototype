@@ -1,6 +1,11 @@
-// Race-day set dressing: spectator crowds behind the fences, pedestrians on
-// the sidewalks, bunting over the corner fences and cones at corner entries.
-// People are two instanced meshes (bodies tinted by clothing, heads by skin).
+// Race-day set dressing: crowds in the thousands, bunting, cones.
+//
+// Crowd system (PS3 grandstand tricks, three layers):
+//   1. Front rows: real character models baked into frozen poses, instanced.
+//   2. The horde: billboard sprites rendered at startup from those same baked
+//      poses into a texture atlas — thousands of spectators for ~2 tris each.
+//   3. Accents: a few fully skinned & animated wavers and sidewalk walkers.
+// Corners get tiered riser platforms so the mass is visible from car height.
 import * as THREE from 'three';
 import { frameAt, mergeGeoms, buildRibbon, ROAD_HALF } from './track.js';
 import { mulberry32 } from './textures.js';
@@ -24,8 +29,7 @@ function paintVerts(g, hex) {
 }
 
 // Bake a skinned character at one animation frame into static world-space
-// geometry — the crowd is then instanced real bodies in frozen poses, the
-// same impostor trick PS3-era games used for grandstands.
+// geometry, normalized to ~1.72 m with feet at y=0.
 function bakePose(gltf, clip, time) {
   const clone = SkeletonUtils.clone(gltf.scene);
   const mixer = new THREE.AnimationMixer(clone);
@@ -53,7 +57,6 @@ function bakePose(gltf, clip, time) {
       parts.push({ geometry: g, material: o.material });
     }
   });
-  // normalize: feet at y=0, centred, ~1.72 m tall
   const box = new THREE.Box3();
   for (const p of parts) { p.geometry.computeBoundingBox(); box.union(p.geometry.boundingBox); }
   const size = box.getSize(new THREE.Vector3());
@@ -64,8 +67,62 @@ function bakePose(gltf, clip, time) {
   return parts;
 }
 
-// Ribbon UVs: u (texture x) runs top→bottom of the strip, v (texture y)
-// repeats along the track — so flags are drawn sideways, hanging toward +x.
+// Render every baked pose into one sprite atlas; returns billboard
+// {geometry, material} per pose (quads with the pose's atlas cell as UVs).
+function makeBillboards(renderer, poses) {
+  const CW = 160, CH = 320;
+  const cols = 8, rows = Math.ceil(poses.length / cols);
+  const rt = new THREE.WebGLRenderTarget(cols * CW, rows * CH, { depthBuffer: true });
+  rt.texture.anisotropy = 4;
+
+  const capScene = new THREE.Scene();
+  capScene.add(new THREE.HemisphereLight(0xdfeaff, 0x8a8070, 1.15));
+  const sun = new THREE.DirectionalLight(0xfff1dc, 2.0);
+  sun.position.set(-2, 3, 4);
+  capScene.add(sun);
+  const cam = new THREE.OrthographicCamera(-0.85, 0.85, 2.12, -0.05, 0.1, 10);
+  cam.position.set(0, 1, 4);
+  cam.lookAt(0, 1, 0);
+
+  const prevColor = new THREE.Color();
+  renderer.getClearColor(prevColor);
+  const prevAlpha = renderer.getClearAlpha();
+  renderer.setClearColor(0x000000, 0);
+  renderer.setRenderTarget(rt);
+  renderer.clear();
+  const holder = new THREE.Group();
+  capScene.add(holder);
+  poses.forEach((parts, i) => {
+    holder.clear();
+    for (const p of parts) holder.add(new THREE.Mesh(p.geometry, p.material));
+    const cx = (i % cols) * CW, cy = Math.floor(i / cols) * CH;
+    // use the render target's own viewport/scissor so renderer canvas state is untouched
+    rt.viewport.set(cx, cy, CW, CH);
+    rt.scissor.set(cx, cy, CW, CH);
+    rt.scissorTest = true;
+    renderer.setRenderTarget(rt);
+    renderer.render(capScene, cam);
+  });
+  rt.viewport.set(0, 0, cols * CW, rows * CH);
+  rt.scissorTest = false;
+  renderer.setRenderTarget(null);
+  renderer.setClearColor(prevColor, prevAlpha);
+
+  return poses.map((_, i) => {
+    const g = new THREE.PlaneGeometry(1.7, 2.17);
+    g.translate(0, 2.17 / 2 - 0.05, 0);
+    const uv = g.attributes.uv;
+    const u0 = (i % cols) / cols, v0 = Math.floor(i / cols) / rows;
+    for (let k = 0; k < uv.count; k++) {
+      uv.setXY(k, u0 + uv.getX(k) / cols, v0 + uv.getY(k) / rows);
+    }
+    const m = new THREE.MeshBasicMaterial({
+      map: rt.texture, alphaTest: 0.4, side: THREE.DoubleSide,
+    });
+    return { geometry: g, material: m };
+  });
+}
+
 function makeBuntingTexture() {
   const c = document.createElement('canvas');
   c.width = 64; c.height = 256;
@@ -87,38 +144,205 @@ function makeBuntingTexture() {
   return t;
 }
 
-export function buildExtras(scene, curve, length, cornerSpans) {
+export function buildExtras(scene, renderer, curve, length, cornerSpans) {
   const rng = mulberry32(2025);
   const dummy = new THREE.Object3D();
   const color = new THREE.Color();
 
-  // ---------------- crowd placement (filled with baked poses once loaded) ---
-  const crowdSpots = []; // {x, z, rot, h, cheer}
-  const put = (s, off, side, facing, cheer) => {
-    const { r, p } = frameAt(curve, length, s);
-    const x = p.x + r.x * side * off, z = p.z + r.z * side * off;
-    const yawToTrack = Math.atan2(-side * r.x, -side * r.z);
-    crowdSpots.push({
-      x, z,
-      rot: facing === 'track' ? yawToTrack + (rng() - 0.5) * 0.5 : rng() * Math.PI * 2,
-      h: 0.92 + rng() * 0.18,
-      cheer,
-    });
+  const turnAngle = (s) => {
+    const a = frameAt(curve, length, s).t;
+    const b = frameAt(curve, length, s + 14).t;
+    return Math.atan2(a.x * b.z - a.z * b.x, a.x * b.x + a.z * b.z);
   };
-  // dense crowds at the corners, behind the catch fence (two loose rows)
+
+  // straight sections = complement of the corner spans
+  const straights = [];
+  {
+    const sorted = [...cornerSpans].sort((a, b) => a[0] - b[0]);
+    let cursor = 0;
+    for (const [a, b] of sorted) {
+      if (a - cursor > 20) straights.push([cursor, a]);
+      cursor = Math.max(cursor, b);
+    }
+    if (length - cursor > 20) straights.push([cursor, length]);
+  }
+
+  // ---------------- crowd spot lists ----------------
+  const spots3d = [];  // {x,z,y,rot,h}  front rows, real geometry
+  const spotsBB = [];  // billboard horde
+  const addRow = (list, a, b, off, y, side, spacing, skip = 0) => {
+    for (let s = a; s < b; s += spacing * (0.85 + rng() * 0.3)) {
+      if (rng() < skip) continue;
+      const { p, r } = frameAt(curve, length, s);
+      const o = off + (rng() - 0.5) * 0.3;
+      list.push({
+        x: p.x + r.x * side * o, z: p.z + r.z * side * o, y,
+        rot: Math.atan2(-side * r.x, -side * r.z) + (rng() - 0.5) * 0.35,
+        h: 0.92 + rng() * 0.18,
+      });
+    }
+  };
+
+  // corners: 3D front row + three tiered billboard rows on risers (outside),
+  // plus a single row on the inside
+  const riserGeos = [];
   for (const [a, b] of cornerSpans) {
-    const n = Math.floor((b - a) / 1.1);
-    for (let i = 0; i < n; i++) {
-      const s = a + rng() * (b - a);
-      const side = rng() < 0.6 ? 1 : -1;
-      put(s, ROAD_HALF + 4.3 + rng() * 1.4, side, 'track', true);
+    const outside = turnAngle((a + b) / 2) > 0 ? 1 : -1;
+    addRow(spots3d, a, b, ROAD_HALF + 4.4, 0.02, outside, 1.05);
+    addRow(spotsBB, a, b, ROAD_HALF + 5.7, 0.5, outside, 0.62);
+    addRow(spotsBB, a, b, ROAD_HALF + 6.5, 1.0, outside, 0.62);
+    addRow(spotsBB, a, b, ROAD_HALF + 7.3, 1.5, outside, 0.62);
+    addRow(spots3d, a, b, ROAD_HALF + 4.4, 0.02, -outside, 1.6, 0.15);
+    addRow(spotsBB, a, b, ROAD_HALF + 5.5, 0, -outside, 0.9, 0.1);
+    // riser steps under the tiered rows
+    riserGeos.push(buildRibbon(curve, length, [
+      { x: outside * (ROAD_HALF + 5.3), y: 0, u: 0 },
+      { x: outside * (ROAD_HALF + 5.3), y: 0.5, u: 0.15 },
+      { x: outside * (ROAD_HALF + 6.1), y: 0.5, u: 0.3 },
+      { x: outside * (ROAD_HALF + 6.1), y: 1.0, u: 0.45 },
+      { x: outside * (ROAD_HALF + 6.9), y: 1.0, u: 0.6 },
+      { x: outside * (ROAD_HALF + 6.9), y: 1.5, u: 0.75 },
+      { x: outside * (ROAD_HALF + 7.7), y: 1.5, u: 0.9 },
+      { x: outside * (ROAD_HALF + 7.7), y: 0, u: 1 },
+    ], 1 / 8, Math.max(10, Math.floor((b - a) / 2.5)), a - 2, b + 2));
+  }
+  if (riserGeos.length) {
+    const riser = new THREE.Mesh(mergeGeoms(riserGeos), new THREE.MeshStandardMaterial({
+      color: 0x7d7a74, roughness: 0.95,
+    }));
+    riser.receiveShadow = true;
+    scene.add(riser);
+  }
+
+  // straights: two packed rows along both fences
+  for (const [a, b] of straights) {
+    for (const side of [-1, 1]) {
+      addRow(spotsBB, a + 6, b - 6, ROAD_HALF + 4.5, 0.02, side, 0.8, 0.08);
+      addRow(spotsBB, a + 6, b - 6, ROAD_HALF + 5.4, 0.02, side, 0.85, 0.12);
     }
   }
-  // scattered pedestrians along the rest of the lap
-  for (let s = 0; s < length; s += 9) {
-    if (rng() < 0.4) continue;
-    put(s + rng() * 6, ROAD_HALF + 4.3 + rng() * 1.3, rng() < 0.5 ? 1 : -1, 'any', false);
-  }
+
+  // ---------------- animated accents + baked crowd ----------------
+  const mixers = [];
+  const walkers = [];
+
+  const findClip = (clips, re) => clips.find((c) => re.test(c.name));
+  const spawn = (gltf, clipRe, x, z, rot, fallbackRe = /idle(_neutral)?$/i) => {
+    const obj = SkeletonUtils.clone(gltf.scene);
+    const box = new THREE.Box3().setFromObject(obj);
+    const h = box.max.y - box.min.y;
+    const sc = (1.68 + rng() * 0.16) / h;
+    obj.scale.setScalar(sc);
+    obj.position.set(x, 0, z);
+    obj.rotation.y = rot;
+    obj.traverse((o) => { if (o.isMesh || o.isSkinnedMesh) { o.castShadow = true; o.frustumCulled = false; } });
+    scene.add(obj);
+    const mixer = new THREE.AnimationMixer(obj);
+    const clip = findClip(gltf.animations, clipRe) || findClip(gltf.animations, fallbackRe) || gltf.animations[0];
+    if (clip) {
+      const action = mixer.clipAction(clip);
+      action.timeScale = 0.9 + rng() * 0.25;
+      action.play();
+      mixer.update(rng() * clip.duration);
+    }
+    mixers.push(mixer);
+    return obj;
+  };
+
+  const loader = makeGLTFLoader();
+  Promise.all(CHARACTERS.map((p) => new Promise((res) => loader.load(p, res, undefined, () => res(null)))))
+    .then((gltfs) => {
+      const loaded = gltfs.filter(Boolean);
+      if (!loaded.length) return;
+
+      const isLight = (g) => {
+        let tris = 0;
+        g.scene.traverse((o) => { if (o.isMesh || o.isSkinnedMesh) tris += (o.geometry.index?.count || o.geometry.attributes.position.count) / 3; });
+        return tris < 8000;
+      };
+      const massChars = loaded.filter(isLight);
+
+      // bake poses: waving (corners) + idle (everywhere)
+      const cheerPoses = [], standPoses = [];
+      for (const g of massChars) {
+        const clips = g.animations;
+        const grab = (re, times, out) => {
+          const clip = clips.find((c) => re.test(c.name));
+          if (!clip) return;
+          for (const f of times) out.push(bakePose(g, clip, clip.duration * f));
+        };
+        grab(/wave$/i, [0.3, 0.62], cheerPoses);
+        grab(/idle(_neutral)?$/i, [0.45], standPoses);
+      }
+      if (!cheerPoses.length && !standPoses.length) return;
+
+      // billboard sprites from the same poses
+      const allPoses = [...cheerPoses, ...standPoses];
+      const bb = makeBillboards(renderer, allPoses);
+      const cheerBB = bb.slice(0, cheerPoses.length);
+      const standBB = bb.slice(cheerPoses.length);
+
+      const instantiate = (spots, variants, tintSat, mirror) => {
+        if (!spots.length || !variants.length) return;
+        const buckets = variants.map(() => []);
+        spots.forEach((sp) => buckets[Math.floor(rng() * variants.length)].push(sp));
+        buckets.forEach((bucket, vi) => {
+          if (!bucket.length) return;
+          const parts = Array.isArray(variants[vi]) ? variants[vi] : [variants[vi]];
+          for (const part of parts) {
+            const im = new THREE.InstancedMesh(part.geometry, part.material, bucket.length);
+            im.frustumCulled = false;
+            bucket.forEach((sp, i) => {
+              dummy.position.set(sp.x, sp.y ?? 0.02, sp.z);
+              dummy.rotation.set(0, sp.rot, 0);
+              // mirroring flips winding, so only for double-sided billboards
+              dummy.scale.set(mirror && rng() < 0.5 ? -sp.h : sp.h, sp.h, sp.h);
+              dummy.updateMatrix();
+              im.setMatrixAt(i, dummy.matrix);
+              im.setColorAt(i, color.setHSL(rng(), tintSat, 0.85 + rng() * 0.14));
+            });
+            im.instanceColor.needsUpdate = true;
+            scene.add(im);
+          }
+        });
+      };
+
+      // front rows in 3D (mix of waving and watching)
+      instantiate(spots3d, [...cheerPoses, ...cheerPoses, ...standPoses], 0.08, false);
+      // the billboard horde: wavers where there are risers, idle elsewhere
+      const bbCheer = spotsBB.filter((s) => s.y > 0.1);
+      const bbStand = spotsBB.filter((s) => s.y <= 0.1);
+      instantiate(bbCheer, [...cheerBB, ...standBB], 0.1, true);
+      instantiate(bbStand, standBB.length ? [...standBB, ...cheerBB.slice(0, 4)] : cheerBB, 0.1, true);
+
+      // fully animated wavers in the front row at the corners
+      const waver = loaded.find((g) => g.animations.some((c) => /wave$/i.test(c.name))) || loaded[0];
+      for (const [a, b] of cornerSpans) {
+        const n = Math.min(4, Math.floor((b - a) / 12));
+        for (let i = 0; i < n; i++) {
+          const s = a + rng() * (b - a);
+          const side = rng() < 0.6 ? 1 : -1;
+          const { p, r } = frameAt(curve, length, s);
+          const off = ROAD_HALF + 3.95 + rng() * 0.4;
+          const yaw = Math.atan2(-side * r.x, -side * r.z);
+          spawn(waver, /wave$/i,
+            p.x + r.x * side * off, p.z + r.z * side * off, yaw + (rng() - 0.5) * 0.4);
+        }
+      }
+      // walkers strolling the sidewalks
+      for (let i = 0; i < 12; i++) {
+        const g = massChars.length ? massChars[Math.floor(rng() * massChars.length)] : loaded[0];
+        const obj = spawn(g, /(^|\|)walk$/i, 0, 0, 0);
+        walkers.push({
+          obj,
+          s: rng() * length,
+          off: ROAD_HALF + 1.6 + rng() * 1.6,
+          side: rng() < 0.5 ? 1 : -1,
+          dir: rng() < 0.5 ? 1 : -1,
+          v: 1.1 + rng() * 0.6,
+        });
+      }
+    });
 
   // ---------------- bunting over the corner fences ----------------
   {
@@ -151,7 +375,7 @@ export function buildExtras(scene, curve, length, cornerSpans) {
       for (let i = 0; i < 5; i++) {
         if (rng() < 0.45) continue;
         const { p, r } = frameAt(curve, length, a - 14 + i * 5);
-        const off = (ROAD_HALF + 0.95) * (rng() < 0.5 ? 1 : -1); // on the kerb edge, off the line
+        const off = (ROAD_HALF + 0.95) * (rng() < 0.5 ? 1 : -1);
         spots.push({ x: p.x + r.x * off, z: p.z + r.z * off });
       }
     }
@@ -169,116 +393,6 @@ export function buildExtras(scene, curve, length, cornerSpans) {
       scene.add(cones);
     }
   }
-
-  // ---------------- animated characters (skinned, CC0/CC-BY GLBs) ----------
-  const mixers = [];
-  const walkers = []; // {obj, s, off, side, dir, v}
-
-  const findClip = (clips, re) => clips.find((c) => re.test(c.name));
-  const spawn = (gltf, clipRe, x, z, rot, fallbackRe = /idle/i) => {
-    const obj = SkeletonUtils.clone(gltf.scene);
-    const box = new THREE.Box3().setFromObject(obj);
-    const h = box.max.y - box.min.y;
-    const sc = (1.68 + rng() * 0.16) / h;
-    obj.scale.setScalar(sc);
-    obj.position.set(x, 0, z);
-    obj.rotation.y = rot;
-    obj.traverse((o) => { if (o.isMesh || o.isSkinnedMesh) { o.castShadow = true; o.frustumCulled = false; } });
-    scene.add(obj);
-    const mixer = new THREE.AnimationMixer(obj);
-    const clip = findClip(gltf.animations, clipRe) || findClip(gltf.animations, fallbackRe) || gltf.animations[0];
-    if (clip) {
-      const action = mixer.clipAction(clip);
-      action.timeScale = 0.9 + rng() * 0.25;
-      action.play();
-      mixer.update(rng() * clip.duration); // desync the crowd
-    }
-    mixers.push(mixer);
-    return obj;
-  };
-
-  const loader = makeGLTFLoader();
-  Promise.all(CHARACTERS.map((p) => new Promise((res) => loader.load(p, res, undefined, () => res(null)))))
-    .then((gltfs) => {
-      const loaded = gltfs.filter(Boolean);
-      if (!loaded.length) return;
-
-      // -------- baked-pose instanced crowd (light characters only) ---------
-      const isLight = (g) => {
-        let tris = 0;
-        g.scene.traverse((o) => { if (o.isMesh || o.isSkinnedMesh) tris += (o.geometry.index?.count || o.geometry.attributes.position.count) / 3; });
-        return tris < 8000;
-      };
-      const massChars = loaded.filter(isLight);
-      const cheerPoses = [], standPoses = [];
-      for (const g of massChars) {
-        const clips = g.animations;
-        const grab = (re, times, out) => {
-          const clip = clips.find((c) => re.test(c.name));
-          if (!clip) return;
-          for (const f of times) out.push(bakePose(g, clip, clip.duration * f));
-        };
-        // clip names end with the action ("...|Wave"); avoid Idle_Gun etc.
-        grab(/wave$/i, [0.3, 0.62], cheerPoses); // arm overhead mid-wave
-        grab(/idle(_neutral)?$/i, [0.2, 0.7], standPoses);
-      }
-      const buildCrowd = (spots, poses) => {
-        if (!spots.length || !poses.length) return;
-        const buckets = poses.map(() => []);
-        spots.forEach((sp) => buckets[Math.floor(rng() * poses.length)].push(sp));
-        buckets.forEach((bucket, pi) => {
-          if (!bucket.length) return;
-          for (const part of poses[pi]) {
-            const im = new THREE.InstancedMesh(part.geometry, part.material, bucket.length);
-            im.frustumCulled = false; // spectators are cheap: no shadow pass
-            bucket.forEach((sp, i) => {
-              dummy.position.set(sp.x, 0.02, sp.z);
-              dummy.rotation.set(0, sp.rot, 0);
-              dummy.scale.setScalar(sp.h);
-              dummy.updateMatrix();
-              im.setMatrixAt(i, dummy.matrix);
-              // subtle per-person tint so identical clones read as different people
-              im.setColorAt(i, color.setHSL(rng(), 0.08, 0.85 + rng() * 0.14));
-            });
-            im.instanceColor.needsUpdate = true;
-            scene.add(im);
-          }
-        });
-      };
-      // corners: mostly waving, some just watching; elsewhere: idle bystanders
-      buildCrowd(crowdSpots.filter((s) => s.cheer),
-        cheerPoses.length ? [...cheerPoses, ...cheerPoses, ...standPoses] : standPoses);
-      buildCrowd(crowdSpots.filter((s) => !s.cheer), standPoses.length ? standPoses : cheerPoses);
-
-      // -------- fully animated accents ------------------------------------
-      // wavers: prefer a character that actually has a wave clip
-      const waver = loaded.find((g) => g.animations.some((c) => /wave/i.test(c.name))) || loaded[0];
-      for (const [a, b] of cornerSpans) {
-        const n = Math.min(4, Math.floor((b - a) / 12));
-        for (let i = 0; i < n; i++) {
-          const s = a + rng() * (b - a);
-          const side = rng() < 0.6 ? 1 : -1;
-          const { p, r } = frameAt(curve, length, s);
-          const off = ROAD_HALF + 3.95 + rng() * 0.4;
-          const yaw = Math.atan2(-side * r.x, -side * r.z);
-          spawn(waver, /wave|yes|cheer/i,
-            p.x + r.x * side * off, p.z + r.z * side * off, yaw + (rng() - 0.5) * 0.4);
-        }
-      }
-      // walkers strolling the sidewalks
-      for (let i = 0; i < 12; i++) {
-        const g = massChars.length ? massChars[Math.floor(rng() * massChars.length)] : loaded[0];
-        const obj = spawn(g, /walk/i, 0, 0, 0);
-        walkers.push({
-          obj,
-          s: rng() * length,
-          off: ROAD_HALF + 1.6 + rng() * 1.6,
-          side: rng() < 0.5 ? 1 : -1,
-          dir: rng() < 0.5 ? 1 : -1,
-          v: 1.1 + rng() * 0.6,
-        });
-      }
-    });
 
   return {
     update(dt) {

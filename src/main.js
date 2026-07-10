@@ -54,9 +54,10 @@ scene.add(hemi);
 const sky = buildSky(scene);
 const { curve, length, cornerSpans } = buildTrack(scene);
 buildCity(scene, curve, length);
-const extras = buildExtras(scene, curve, length, cornerSpans);
-const traffic = buildTraffic(scene, curve, length);
+// hero car first: its download + Draco decode should win the network queue
 const car = createCar(scene);
+const extras = buildExtras(scene, renderer, curve, length, cornerSpans);
+const traffic = buildTraffic(scene, curve, length);
 
 // image-based lighting from the generated sky (gives glass its sheen)
 {

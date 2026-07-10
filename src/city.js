@@ -116,7 +116,7 @@ export function buildCity(scene, curve, length) {
       const cls = pickClass(rng, dt);
       const w = 10 + rng() * 8;   // along road
       const d = 9 + rng() * 9;    // depth
-      const off = ROAD_HALF + 5.6 + d / 2 + rng() * 6;
+      const off = ROAD_HALF + 8.8 + d / 2 + rng() * 6; // leaves room for crowd risers
       const x = p.x + r.x * side * off, z = p.z + r.z * side * off;
       if (!minRoadDist(x, z, Math.max(w, d) * 0.5 + ROAD_HALF + 4.2)) continue;
       const b = {

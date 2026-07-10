@@ -308,7 +308,11 @@ export function createCar(scene) {
       dir: wheelRig.forwardSign, // steering sign flips with the model's native facing
     };
     root.add(holder);
-  }, undefined, () => { /* no assets/car.glb — the sculpted placeholder keeps driving */ });
+    console.info('[car] GLB model loaded');
+  }, undefined, (err) => {
+    // no assets/car.glb (or decode failure) — the sculpted placeholder keeps driving
+    console.warn('[car] GLB load failed:', err?.message || err);
+  });
 
   return {
     root,
