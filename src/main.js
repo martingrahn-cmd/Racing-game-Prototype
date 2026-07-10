@@ -225,7 +225,7 @@ function updateCamera(dt, time, st) {
   const sf = THREE.MathUtils.clamp((kmh - 90) / 210, 0, 1);
   const back = st?.lookBack ? -1 : 1; // held: camera swings to face rearward
 
-  car.update(carGround, dirVec, roll, steer, speedMs, dt, st ? st.brake > 0.15 : false);
+  car.update(carGround, dirVec, roll, steer, speedMs, dt, st ? st.brake > 0.15 || st.drifting : false);
   car.setVisible(camMode !== 1);
 
   if (camMode === 0) { // chase
@@ -461,6 +461,9 @@ function loop(now) {
     car: st ? st.pos.toArray().map((n) => +n.toFixed(1)) : null,
     yaw: st ? +st.yaw.toFixed(3) : null,
     kmh: Math.round(kmh), tier, playing: drive.playing,
+    post: postEnabled, d: +daynight.dayness.toFixed(3),
+    sun: +sun.intensity.toFixed(2), hemi: +hemi.intensity.toFixed(2),
+    tris: renderer.info.render.triangles,
   };
 }
 requestAnimationFrame(loop);

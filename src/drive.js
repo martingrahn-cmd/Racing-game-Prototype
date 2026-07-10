@@ -16,9 +16,9 @@ export const TUNE = {
   accel: 13.5,
   brakeForce: 24,
   grip: 6.5,
-  driftGrip: 1.3,
+  driftGrip: 1.8,   // more bite in the slide = a heavier, less floaty drift
   steer: 2.4,
-  driftSteer: 2.0,
+  driftSteer: 1.6,
 };
 
 export function createDrive(curve, length) {
@@ -155,7 +155,7 @@ export function createDrive(curve, length) {
       if (!inp.hand && Math.abs(fwdSpeed) > 1) lastDir = Math.sign(fwdSpeed);
       const targetYawVel = -inp.steer * steerAuthority * (inp.hand ? TUNE.driftSteer : 1)
         * lastDir * Math.min(speed / 6, 1);
-      const response = inp.hand ? 3.2 : 10; // sliding tires hold their rotation
+      const response = inp.hand ? 2.3 : 10; // sliding tires hold their rotation (inertia = weight)
       yawVel += (targetYawVel - yawVel) * Math.min(1, response * dt);
       yaw += yawVel * dt;
       heading.set(Math.sin(yaw), 0, Math.cos(yaw));

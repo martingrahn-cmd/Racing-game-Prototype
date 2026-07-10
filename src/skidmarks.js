@@ -4,8 +4,8 @@
 import * as THREE from 'three';
 
 const MAX_QUADS = 1100;
-const TIRE_W = 0.15;
-const SEG_LEN = 0.4;
+const TIRE_W = 0.24;
+const SEG_LEN = 0.35;
 
 export function createSkidmarks(scene) {
   const positions = new Float32Array(MAX_QUADS * 4 * 3);
@@ -50,12 +50,13 @@ export function createSkidmarks(scene) {
 
   let cursor = 0;
   let burnTimer = 0;
-  const last = [null, null]; // per rear wheel: {c: Vector3, l: Vector3, r: Vector3}
+  const last = [null, null];     // per rear wheel: {c, l, r: Vector3}
+  const lastPerp = [null, null]; // width direction memory (prevents bowties)
   const c = new THREE.Vector3(), right = new THREE.Vector3();
   const segDir = new THREE.Vector3(), perp = new THREE.Vector3();
   const UP = new THREE.Vector3(0, 1, 0);
 
-  function emit(prev, cur) {
+  function emit(prev, cur, alpha = 0.7) {
     const v = cursor * 4;
     positions.set([
       prev.l.x, prev.l.y, prev.l.z,
@@ -63,7 +64,7 @@ export function createSkidmarks(scene) {
       cur.l.x, cur.l.y, cur.l.z,
       cur.r.x, cur.r.y, cur.r.z,
     ], v * 3);
-    alphas[v] = alphas[v + 1] = alphas[v + 2] = alphas[v + 3] = 0.55;
+    alphas[v] = alphas[v + 1] = alphas[v + 2] = alphas[v + 3] = alpha;
     cursor = (cursor + 1) % MAX_QUADS;
   }
 
@@ -71,24 +72,26 @@ export function createSkidmarks(scene) {
     update(dt, st) {
       const marking = st && (st.slip > 2.4 || (st.throttle > 0.6 && st.speed < 7));
 
-      // standing burnout: no travel, so grow a rubber patch under the tires
+      // standing burnout: no travel, so darken a clean tire-shaped patch
+      // (overlapping low-alpha quads accumulate into rich black rubber)
       if (marking && st.speed < 2.5) {
         burnTimer -= dt;
         if (burnTimer <= 0) {
-          burnTimer = 0.13;
+          burnTimer = 0.1;
           right.set(-st.heading.z, 0, st.heading.x);
           for (const side of [-1, 1]) {
             c.copy(st.pos)
-              .addScaledVector(st.heading, -1.35 + (Math.random() - 0.5) * 0.25)
-              .addScaledVector(right, side * 0.8 + (Math.random() - 0.5) * 0.06);
+              .addScaledVector(st.heading, -1.35)
+              .addScaledVector(right, side * 0.8);
             c.y = 0.04;
-            const h = st.heading, half = 0.2;
+            const h = st.heading, half = 0.3;
             const rw = TIRE_W / 2;
             emit(
               { l: c.clone().addScaledVector(h, -half).addScaledVector(right, rw),
                 r: c.clone().addScaledVector(h, -half).addScaledVector(right, -rw) },
               { l: c.clone().addScaledVector(h, half).addScaledVector(right, rw),
                 r: c.clone().addScaledVector(h, half).addScaledVector(right, -rw) },
+              0.3,
             );
           }
         }
@@ -109,7 +112,11 @@ export function createSkidmarks(scene) {
           segDir.subVectors(c, prev.c);
           if (segDir.lengthSq() < SEG_LEN * SEG_LEN) continue;
           if (segDir.lengthSq() > 25) { last[side] = null; continue; } // teleport/reset
-          perp.crossVectors(UP, segDir).normalize().multiplyScalar(TIRE_W / 2);
+          perp.crossVectors(UP, segDir).normalize();
+          // keep the width vector on a consistent side, or quads fold into bowties
+          if (lastPerp[side] && perp.dot(lastPerp[side]) < 0) perp.negate();
+          lastPerp[side] = (lastPerp[side] || new THREE.Vector3()).copy(perp);
+          perp.multiplyScalar(TIRE_W / 2);
           const cur = {
             c: c.clone(),
             l: c.clone().add(perp),
@@ -125,6 +132,7 @@ export function createSkidmarks(scene) {
         }
       } else {
         last[0] = last[1] = null;
+        lastPerp[0] = lastPerp[1] = null;
       }
 
       // slow fade — old rubber stays visible ~25 s
