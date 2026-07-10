@@ -140,10 +140,11 @@ export function createDrive(curve, length) {
       const fwdSpeed = vel.dot(heading);
       const speed = vel.length();
 
-      // steering: full lock at low speed, tightening down as speed rises
+      // steering: full lock at low speed, tightening down as speed rises.
+      // positive steer = turn right = yaw DECREASES (heading (sin,cos) is CCW).
       const steerAuthority = TUNE.steer - TUNE.steer * 0.65 * Math.min(Math.abs(fwdSpeed) / 45, 1);
-      let yawRate = inp.steer * steerAuthority * (inp.hand ? TUNE.driftSteer : 1);
-      if (Math.abs(fwdSpeed) > 0.4) yaw += yawRate * Math.sign(fwdSpeed) * Math.min(Math.abs(fwdSpeed) / 6, 1) * dt;
+      const yawRate = inp.steer * steerAuthority * (inp.hand ? TUNE.driftSteer : 1);
+      if (Math.abs(fwdSpeed) > 0.4) yaw -= yawRate * Math.sign(fwdSpeed) * Math.min(Math.abs(fwdSpeed) / 6, 1) * dt;
       heading.set(Math.sin(yaw), 0, Math.cos(yaw));
 
       // throttle / brake / reverse
@@ -156,7 +157,7 @@ export function createDrive(curve, length) {
       vel.addScaledVector(heading, acc * dt);
 
       // grip: bleed lateral velocity (loose when the handbrake is on)
-      right.set(heading.z, 0, -heading.x);
+      right.set(-heading.z, 0, heading.x); // true right = heading × up
       const lat = vel.dot(right);
       const grip = inp.hand ? TUNE.driftGrip : TUNE.grip;
       vel.addScaledVector(right, -lat * Math.min(grip * dt, 1));

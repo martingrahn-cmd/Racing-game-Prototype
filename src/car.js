@@ -391,11 +391,12 @@ export function createCar(scene) {
     update(p, t, roll, steer, speed, dt) {
       root.position.copy(p);
       // Euler XYZ: the z component banks the car around its own forward axis.
-      // Body rolls OUT of the corner (opposite of the camera's lean-in).
-      root.rotation.set(0, Math.atan2(t.x, t.z), roll * 0.7);
+      // roll+ = right turn → body leans OUT (left) = negative local z roll.
+      root.rotation.set(0, Math.atan2(t.x, t.z), -roll * 0.7);
       const spin = (speed * dt) / rig.wheelRadius * (rig.dir || 1);
       for (const w of rig.wheels) w.rotation.x += spin;
-      for (const pv of rig.steerPivots) pv.rotation.y = steer * (rig.dir || 1);
+      // steer+ = right → wheel yaw toward local -x (the right-hand side)
+      for (const pv of rig.steerPivots) pv.rotation.y = -steer * (rig.dir || 1);
       blob.position.set(p.x, 0.05, p.z);
       blob.rotation.z = -root.rotation.y;
     },
