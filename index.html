@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>APEX CITY — Racing Prototype</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; background: #0b0d10; }
+  body { font-family: system-ui, -apple-system, sans-serif; user-select: none; -webkit-user-select: none; }
+  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+
+  /* subtle top/bottom cinematic shading (main vignette is done in-shader) */
+  #vignette {
+    position: fixed; inset: 0; pointer-events: none;
+    background: linear-gradient(rgba(10,14,20,0.14), transparent 10%, transparent 90%, rgba(10,14,20,0.16));
+  }
+
+  .hud { position: fixed; pointer-events: none; color: #fff; }
+  #title {
+    top: max(14px, env(safe-area-inset-top)); left: 20px;
+    font-style: italic; font-weight: 900; letter-spacing: 0.04em;
+    font-size: clamp(18px, 3vw, 26px);
+    text-shadow: 0 2px 12px rgba(0,0,0,0.55);
+  }
+  #title small {
+    display: block; font-size: 0.44em; font-weight: 600; letter-spacing: 0.28em;
+    color: #ffd94a; margin-top: 2px;
+  }
+  #speedBox {
+    right: 22px; bottom: max(18px, env(safe-area-inset-bottom));
+    text-align: right; font-style: italic;
+    text-shadow: 0 2px 14px rgba(0,0,0,0.6);
+  }
+  #speed { font-size: clamp(44px, 9vw, 76px); font-weight: 900; line-height: 0.9; }
+  #speedBox .unit { font-size: clamp(12px, 2vw, 16px); font-weight: 700; letter-spacing: 0.2em; color: #ffd94a; }
+  #camName {
+    left: 20px; bottom: max(18px, env(safe-area-inset-bottom));
+    font-weight: 800; font-style: italic; letter-spacing: 0.18em;
+    font-size: clamp(13px, 2.2vw, 17px); color: rgba(255,255,255,0.92);
+    text-shadow: 0 2px 10px rgba(0,0,0,0.6);
+  }
+  #camName::before { content: "📷 "; font-style: normal; }
+  #fps {
+    top: max(14px, env(safe-area-inset-top)); right: 20px;
+    font-size: 12px; font-weight: 700; letter-spacing: 0.1em;
+    color: rgba(255,255,255,0.55);
+  }
+  #hint {
+    left: 50%; transform: translateX(-50%);
+    bottom: max(18px, env(safe-area-inset-bottom));
+    font-size: 11px; letter-spacing: 0.14em; font-weight: 600;
+    color: rgba(255,255,255,0.5); text-align: center;
+  }
+  @media (max-width: 700px) { #hint { display: none; } }
+  #prompt {
+    left: 50%; transform: translateX(-50%);
+    top: max(60px, calc(env(safe-area-inset-top) + 46px));
+    font-size: clamp(13px, 2.4vw, 18px); letter-spacing: 0.18em; font-weight: 800;
+    font-style: italic; color: #ffd94a; text-align: center;
+    text-shadow: 0 2px 10px rgba(0,0,0,0.7);
+    animation: promptPulse 1.6s ease-in-out infinite;
+  }
+  @keyframes promptPulse { 50% { opacity: 0.45; } }
+
+  #controls {
+    position: fixed; right: 16px; top: 50%; transform: translateY(-50%);
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  #controls button {
+    width: 46px; height: 46px; border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.3);
+    background: rgba(16,20,28,0.45); color: #fff;
+    font-size: 19px; font-weight: 800; cursor: pointer;
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  }
+  #controls button:active { background: rgba(255,217,74,0.5); }
+
+  #minimap {
+    position: fixed; left: 18px; bottom: max(52px, calc(env(safe-area-inset-bottom) + 40px));
+    width: 150px; height: 150px; pointer-events: none;
+    background: rgba(10,14,20,0.35); border-radius: 50%;
+    backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px);
+  }
+  @media (max-width: 700px) { #minimap { width: 110px; height: 110px; } }
+
+  #loader {
+    position: fixed; inset: 0; z-index: 10;
+    background: #0b0d10; display: flex; align-items: center; justify-content: center;
+    color: #fff; font-style: italic; font-weight: 900; letter-spacing: 0.1em;
+    font-size: clamp(18px, 4vw, 30px);
+    transition: opacity 0.7s ease;
+  }
+  #loader.done { opacity: 0; pointer-events: none; }
+  #loader span { color: #ffd94a; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="vignette"></div>
+
+<div class="hud" id="title">APEX CITY<small>STADSBANA · PROTOTYP</small></div>
+<div class="hud" id="fps"></div>
+<div class="hud" id="speedBox"><div id="speed">180</div><div class="unit">KM/H</div></div>
+<div class="hud" id="camName">CHASE</div>
+<div class="hud" id="hint">[↑↓←→/WASD] KÖR &nbsp;·&nbsp; [SPACE] HANDBROMS &nbsp;·&nbsp; [B] BAKÅT &nbsp;·&nbsp; [H] TUTA &nbsp;·&nbsp; [R] RESET &nbsp;·&nbsp; [C] KAMERA</div>
+<div class="hud" id="prompt"></div>
+
+<canvas id="minimap" width="150" height="150"></canvas>
+
+<div id="controls">
+  <button id="btnCam" title="Byt kamera">📷</button>
+  <button id="btnPlus" title="Öka fart">+</button>
+  <button id="btnMinus" title="Sänk fart">−</button>
+</div>
+
+<div id="loader">GENERERAR <span>&nbsp;STAD…</span></div>
+
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js" } }
+</script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
