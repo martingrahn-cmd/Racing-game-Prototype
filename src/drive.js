@@ -1,0 +1,192 @@
+// Player driving: arcade physics with grip/drift, keyboard + gamepad input.
+// The circuit is fenced, so the car is kept inside the track corridor by
+// tracking progress along the spline and clamping lateral offset.
+//
+// Gamepad (standard mapping): left stick = steer, RT = gas, LT = brake/reverse,
+// A/Cross = handbrake, B/Circle = look back, Y/Triangle = camera.
+import * as THREE from 'three';
+import { frameAt } from './track.js';
+
+const TRACK_HALF = 8.3;        // fence corridor half-width
+const MAX_SPEED = 61;          // m/s ≈ 220 km/h
+const MAX_REVERSE = 9;
+
+export function createDrive(curve, length) {
+  // ---------------- input ----------------
+  const keys = new Set();
+  addEventListener('keydown', (e) => {
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
+    keys.add(e.code);
+  });
+  addEventListener('keyup', (e) => keys.delete(e.code));
+
+  let padIndex = null;
+  let padToast = 0;
+  addEventListener('gamepadconnected', (e) => { padIndex = e.gamepad.index; padToast = 4; });
+  addEventListener('gamepaddisconnected', (e) => { if (padIndex === e.gamepad.index) padIndex = null; });
+
+  let cameraTapped = false; // edge-triggered camera cycle from the pad
+  let camHeld = false;
+
+  function readInput() {
+    let steer = 0, throttle = 0, brake = 0, hand = false, look = false;
+    if (keys.has('ArrowLeft') || keys.has('KeyA')) steer -= 1;
+    if (keys.has('ArrowRight') || keys.has('KeyD')) steer += 1;
+    if (keys.has('ArrowUp') || keys.has('KeyW')) throttle = 1;
+    if (keys.has('ArrowDown') || keys.has('KeyS')) brake = 1;
+    if (keys.has('Space')) hand = true;
+    if (keys.has('KeyR')) look = true;
+
+    const pad = padIndex !== null ? navigator.getGamepads()[padIndex] : null;
+    if (pad) {
+      const dz = (v) => (Math.abs(v) < 0.13 ? 0 : v);
+      steer += dz(pad.axes[0] ?? 0);
+      throttle = Math.max(throttle, pad.buttons[7]?.value ?? 0);         // RT
+      brake = Math.max(brake, pad.buttons[6]?.value ?? 0);               // LT
+      hand = hand || !!pad.buttons[0]?.pressed;                          // A / Cross
+      look = look || !!pad.buttons[1]?.pressed;                          // B / Circle
+      const camBtn = !!pad.buttons[3]?.pressed;                          // Y / Triangle
+      if (camBtn && !camHeld) cameraTapped = true;
+      camHeld = camBtn;
+      // d-pad steering fallback
+      if (pad.buttons[14]?.pressed) steer -= 1;
+      if (pad.buttons[15]?.pressed) steer += 1;
+    }
+    return { steer: THREE.MathUtils.clamp(steer, -1, 1), throttle, brake, hand, look };
+  }
+
+  function rumble(strong, weak, ms) {
+    const pad = padIndex !== null ? navigator.getGamepads()[padIndex] : null;
+    try {
+      pad?.vibrationActuator?.playEffect('dual-rumble', {
+        duration: ms, strongMagnitude: strong, weakMagnitude: weak,
+      });
+    } catch { /* no rumble support */ }
+  }
+
+  // ---------------- state ----------------
+  const pos = new THREE.Vector3();
+  const vel = new THREE.Vector3();
+  const heading = new THREE.Vector3(0, 0, 1);
+  const fwd = new THREE.Vector3(), right = new THREE.Vector3(), tmp = new THREE.Vector3();
+  let yaw = 0;
+  let sEst = 0;
+  let playing = false;
+  let wallBuzz = 0;
+
+  function takeControl(attractS) {
+    playing = true;
+    sEst = attractS;
+    const { p, t } = frameAt(curve, length, attractS);
+    pos.copy(p); pos.y = 0;
+    yaw = Math.atan2(t.x, t.z);
+    const kmh0 = 180 / 3.6;
+    vel.set(t.x, 0, t.z).multiplyScalar(kmh0);
+  }
+
+  // refine progress estimate around the previous value (handles the loop wrap)
+  function refineS() {
+    let best = sEst, bestD = Infinity;
+    for (let ds = -14; ds <= 30; ds += 2.5) {
+      const s = sEst + ds;
+      const { p } = frameAt(curve, length, s);
+      const d = (p.x - pos.x) ** 2 + (p.z - pos.z) ** 2;
+      if (d < bestD) { bestD = d; best = s; }
+    }
+    sEst = ((best % length) + length) % length;
+  }
+
+  return {
+    get playing() { return playing; },
+    get sEst() { return sEst; },
+    consumeCameraTap() { const t = cameraTapped; cameraTapped = false; return t; },
+    consumePadToast() { const t = padToast; padToast = 0; return t; },
+
+    // returns null while in attract mode; first drive input takes over
+    update(dt, attractS, trafficCars) {
+      const inp = readInput();
+      if (!playing) {
+        if (inp.throttle > 0.15 || inp.brake > 0.15 || Math.abs(inp.steer) > 0.4) takeControl(attractS);
+        else return null;
+      }
+
+      heading.set(Math.sin(yaw), 0, Math.cos(yaw));
+      const fwdSpeed = vel.dot(heading);
+      const speed = vel.length();
+
+      // steering: full lock at low speed, tightening down as speed rises
+      const steerAuthority = 2.4 - 1.55 * Math.min(Math.abs(fwdSpeed) / 45, 1);
+      let yawRate = inp.steer * steerAuthority * (inp.hand ? 1.55 : 1);
+      if (Math.abs(fwdSpeed) > 0.4) yaw += yawRate * Math.sign(fwdSpeed) * Math.min(Math.abs(fwdSpeed) / 6, 1) * dt;
+      heading.set(Math.sin(yaw), 0, Math.cos(yaw));
+
+      // throttle / brake / reverse
+      let acc = 0;
+      if (inp.throttle > 0) acc += inp.throttle * (13.5 - 9 * Math.max(fwdSpeed, 0) / MAX_SPEED);
+      if (inp.brake > 0) {
+        if (fwdSpeed > 0.6) acc -= inp.brake * 24;
+        else acc -= inp.brake * 7; // reverse
+      }
+      vel.addScaledVector(heading, acc * dt);
+
+      // grip: bleed lateral velocity (loose when the handbrake is on)
+      right.set(heading.z, 0, -heading.x);
+      const lat = vel.dot(right);
+      const grip = inp.hand ? 1.3 : 6.5;
+      vel.addScaledVector(right, -lat * Math.min(grip * dt, 1));
+      // drag + handbrake scrub
+      vel.multiplyScalar(Math.max(0, 1 - (0.25 + (inp.hand ? 1.0 : 0)) * dt * 0.4));
+
+      // clamp forward/reverse speed
+      const f2 = vel.dot(heading);
+      if (f2 > MAX_SPEED) vel.addScaledVector(heading, MAX_SPEED - f2);
+      if (f2 < -MAX_REVERSE) vel.addScaledVector(heading, -MAX_REVERSE - f2);
+
+      pos.addScaledVector(vel, dt);
+
+      // stay inside the fenced corridor
+      refineS();
+      const fr = frameAt(curve, length, sEst);
+      tmp.subVectors(pos, fr.p);
+      const lateral = tmp.dot(fr.r);
+      if (Math.abs(lateral) > TRACK_HALF) {
+        const over = lateral - Math.sign(lateral) * TRACK_HALF;
+        pos.addScaledVector(fr.r, -over);
+        const vLat = vel.dot(fr.r);
+        if (Math.sign(vLat) === Math.sign(lateral)) {
+          vel.addScaledVector(fr.r, -vLat * 1.35); // soft bounce
+          vel.multiplyScalar(0.92);
+          if (wallBuzz <= 0 && speed > 8) { rumble(0.7, 0.4, 130); wallBuzz = 0.35; }
+        }
+      }
+      wallBuzz = Math.max(0, wallBuzz - dt);
+
+      // shoulder-check against traffic (cheap sphere push, player only)
+      if (trafficCars) {
+        for (const c of trafficCars) {
+          const dx = pos.x - c.group.position.x, dz = pos.z - c.group.position.z;
+          const d2 = dx * dx + dz * dz;
+          if (d2 < 6.5 && d2 > 0.001) {
+            const d = Math.sqrt(d2);
+            const push = (2.55 - d) / d;
+            pos.x += dx * push * 0.6; pos.z += dz * push * 0.6;
+            vel.multiplyScalar(0.965);
+            if (wallBuzz <= 0) { rumble(0.5, 0.6, 90); wallBuzz = 0.3; }
+          }
+        }
+      }
+
+      const drifting = inp.hand && Math.abs(lat) > 3;
+      return {
+        pos, heading, yaw,
+        speed: vel.length(),
+        kmh: Math.abs(vel.dot(heading)) * 3.6,
+        steer: inp.steer * 0.42,
+        roll: THREE.MathUtils.clamp(-lat * 0.012, -0.09, 0.09),
+        lookBack: inp.look,
+        drifting,
+        s: sEst,
+      };
+    },
+  };
+}

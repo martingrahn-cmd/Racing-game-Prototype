@@ -78,6 +78,7 @@ export function buildTraffic(scene, curve, length) {
   });
 
   return {
+    cars,
     update(dt) {
       for (const c of cars) {
         c.s = ((c.s + c.dir * c.v * dt) % length + length) % length;

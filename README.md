@@ -22,13 +22,23 @@ Funkar även direkt på GitHub Pages (Settings → Pages → deploy from branch)
 
 ## Kontroller
 
-| Input | Funktion |
-|---|---|
-| `C` / mellanslag / tryck på skärmen | Byt kamera (chase → bumper → helikopter → TV) |
-| `↑` / `↓` (eller `+` / `−`) | Ändra fart (90–300 km/h) |
+Spelet startar i *attract mode* — **gasa för att ta över bilen**.
 
-Utan input går spelet i *attract mode* och klipper mellan kamerorna själv.
-URL-parametrar för felsökning: `?s=520&cam=2&speed=4` (position på banan, kamera, fart).
+| Funktion | Tangentbord | Handkontroll |
+|---|---|---|
+| Gas | `↑` / `W` | RT (höger avtryckare) |
+| Broms / back | `↓` / `S` | LT (vänster avtryckare) |
+| Styrning | `←→` / `A D` | Vänster spak (+ d-pad) |
+| Handbroms (sladd!) | `Mellanslag` | A / Kryss |
+| Titta bakåt | `R` | B / Cirkel |
+| Byt kamera | `C` | Y / Triangel |
+
+Handkontrollen har vibration vid väggträff och trafikkontakt. Utan input
+klipper attract-läget mellan kamerorna själv.
+
+URL-parametrar: `?s=520&cam=2&speed=4` (startposition/kamera/attract-fart),
+`?car=saab` (procedurell SVEN 9000-hyllning), `?car=proto` (skulpterad kupé),
+`?paint=blue|yellow|silver|black|white|green`.
 
 ## Fler vyer
 

@@ -8,6 +8,7 @@ import { createPost } from './post.js';
 import { createCar } from './car.js';
 import { buildExtras } from './extras.js';
 import { buildTraffic } from './traffic.js';
+import { createDrive } from './drive.js';
 
 // ------------------------------------------------------------ renderer
 const canvas = document.getElementById('game');
@@ -30,6 +31,12 @@ function setDirectToneMapping(on) {
     if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => (m.needsUpdate = true));
   });
 }
+
+// software/mobile GPUs can drop the context under load — recover by reloading
+canvas.addEventListener('webglcontextlost', (e) => {
+  e.preventDefault();
+  location.reload();
+});
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0xdfe9f2, 260, 3100);
@@ -58,6 +65,7 @@ buildCity(scene, curve, length);
 const car = createCar(scene);
 const extras = buildExtras(scene, renderer, curve, length, cornerSpans);
 const traffic = buildTraffic(scene, curve, length);
+const drive = createDrive(curve, length);
 
 // image-based lighting from the generated sky (gives glass its sheen)
 {
@@ -107,36 +115,57 @@ function modDist(a, b) { // distance from a forward to b along loop
   return d;
 }
 
-function updateCamera(dt, time) {
-  const kmh = SPEEDS[speedIdx];
-  const v = kmh / 3.6;
-  sPos = (sPos + v * dt) % length;
+const dirVec = V(), rightVec = V();
 
-  pointAt(sPos, carP).y += 0.55;
-  pointAt(sPos, carGround).y += 0.035;
-  const sf = (kmh - 90) / 210; // 0..1 speed factor
+function updateCamera(dt, time, st) {
+  let kmh, roll, steer, speedMs;
+  if (st) {
+    // player is driving: anchor everything to the real car state
+    sPos = st.s;
+    carP.copy(st.pos); carP.y += 0.55;
+    carGround.copy(st.pos); carGround.y += 0.035;
+    dirVec.copy(st.heading);
+    kmh = st.kmh;
+    speedMs = st.speed;
+    roll = st.roll;
+    steer = st.steer;
+  } else {
+    // attract mode: ghost point runs along the spline
+    kmh = SPEEDS[speedIdx];
+    speedMs = kmh / 3.6;
+    sPos = (sPos + speedMs * dt) % length;
+    pointAt(sPos, carP).y += 0.55;
+    pointAt(sPos, carGround).y += 0.035;
+    const fr = frameAt(curve, length, sPos);
+    dirVec.copy(fr.t);
+    const curvature = signedCurvature(sPos);
+    roll = THREE.MathUtils.clamp(-curvature * 1.6, -0.10, 0.10);
+    steer = THREE.MathUtils.clamp(curvature * 2.2, -0.45, 0.45);
+  }
+  rightVec.set(dirVec.z, 0, -dirVec.x);
+  const sf = THREE.MathUtils.clamp((kmh - 90) / 210, 0, 1);
+  const back = st?.lookBack ? -1 : 1; // held: camera swings to face rearward
 
-  const fr = frameAt(curve, length, sPos);
-  const curvature = signedCurvature(sPos);
-  const roll = THREE.MathUtils.clamp(-curvature * 1.6, -0.10, 0.10);
-
-  // the car itself (hidden in bumper view so it doesn't block the lens)
-  const steer = THREE.MathUtils.clamp(curvature * 2.2, -0.45, 0.45);
-  car.update(carGround, fr.t, roll, steer, v, dt);
+  car.update(carGround, dirVec, roll, steer, speedMs, dt);
   car.setVisible(camMode !== 1);
 
   if (camMode === 0) { // chase
-    pointAt(sPos - 7.2, camPos).y += 1.9;
-    pointAt(sPos + 16, lookP).y += 1.0;
+    camPos.copy(carGround).addScaledVector(dirVec, -7.2 * back);
+    camPos.y += 1.9;
+    lookP.copy(carGround).addScaledVector(dirVec, 16 * back);
+    lookP.y += 1.0;
   } else if (camMode === 1) { // bumper
-    camPos.copy(carP); camPos.y += 0.65;
-    camPos.addScaledVector(fr.r, roll * 3);
-    pointAt(sPos + 34, lookP).y += 0.9;
+    camPos.copy(carGround).addScaledVector(dirVec, 2.35 * back);
+    camPos.y += 0.72;
+    camPos.addScaledVector(rightVec, roll * 3);
+    lookP.copy(carGround).addScaledVector(dirVec, 34 * back);
+    lookP.y += 0.9;
   } else if (camMode === 2) { // helicopter
-    pointAt(sPos - 42, camPos);
+    camPos.copy(carGround).addScaledVector(dirVec, -38);
     camPos.y += 46;
-    camPos.addScaledVector(fr.r, 22);
-    pointAt(sPos + 40, lookP).y += 2;
+    camPos.addScaledVector(rightVec, 22);
+    lookP.copy(carGround).addScaledVector(dirVec, 40);
+    lookP.y += 2;
   } else if (camMode === 4) { // photo orbit around the car
     const a = time * 0.35;
     camPos.copy(carGround);
@@ -161,21 +190,21 @@ function updateCamera(dt, time) {
   // speed shake (not for trackside/photo)
   if (camMode !== 3 && camMode !== 4) {
     camPos.y += Math.sin(time * 31) * 0.018 * (0.3 + sf);
-    camPos.addScaledVector(fr.r, Math.sin(time * 23.7) * 0.02 * (0.3 + sf));
+    camPos.addScaledVector(rightVec, Math.sin(time * 23.7) * 0.02 * (0.3 + sf));
   }
 
-  // smoothing
+  // smoothing (snappier when the player drives, or the chase cam lags corners)
   if (!smoothedPos) {
     smoothedPos = camPos.clone();
     smoothedLook = lookP.clone();
   }
-  const posK = camMode === 3 ? 1 : 1 - Math.pow(0.0001, dt);
-  const lookK = 1 - Math.pow(0.00005, dt);
+  const posK = camMode === 3 ? 1 : 1 - Math.pow(st ? 0.000001 : 0.0001, dt);
+  const lookK = 1 - Math.pow(st ? 0.000001 : 0.00005, dt);
   smoothedPos.lerp(camPos, camMode === 3 ? 1 : posK);
   smoothedLook.lerp(lookP, lookK);
 
   camera.position.copy(smoothedPos);
-  camera.up.set(0, 1, 0).addScaledVector(fr.r, camMode === 3 ? 0 : roll);
+  camera.up.set(0, 1, 0).addScaledVector(rightVec, camMode === 3 ? 0 : roll);
   camera.up.normalize();
   camera.lookAt(smoothedLook);
 
@@ -201,9 +230,9 @@ function changeSpeed(d) {
   speedIdx = THREE.MathUtils.clamp(speedIdx + d, 0, SPEEDS.length - 1);
 }
 addEventListener('keydown', (e) => {
-  if (e.code === 'KeyC' || e.code === 'Space') { e.preventDefault(); cycleCamera(); }
-  if (e.code === 'ArrowUp' || e.code === 'Equal') changeSpeed(1);
-  if (e.code === 'ArrowDown' || e.code === 'Minus') changeSpeed(-1);
+  if (e.code === 'KeyC') { e.preventDefault(); cycleCamera(); }
+  if (!drive.playing && (e.code === 'Equal')) changeSpeed(1);
+  if (!drive.playing && (e.code === 'Minus')) changeSpeed(-1);
 });
 document.getElementById('btnCam').addEventListener('click', cycleCamera);
 document.getElementById('btnPlus').addEventListener('click', () => changeSpeed(1));
@@ -265,7 +294,10 @@ resize();
 const elSpeed = document.getElementById('speed');
 const elFps = document.getElementById('fps');
 const elCam = document.getElementById('camName');
+const elPrompt = document.getElementById('prompt');
 const CAM_NAMES = ['CHASE', 'BUMPER', 'HELI', 'TV', 'PHOTO'];
+const ATTRACT_PROMPT = 'GASA FÖR ATT KÖRA — ↑ / W ELLER RT PÅ HANDKONTROLL';
+let promptTimer = 0;
 let fpsAcc = 0, fpsN = 0, fpsTimer = 0;
 
 // ------------------------------------------------------------ main loop
@@ -279,16 +311,18 @@ function loop(now) {
   last = now;
   perfTime += dt;
 
+  const st = drive.update(dt, sPos, traffic.cars);
+  if (drive.consumeCameraTap()) cycleCamera();
+
   // attract mode: auto-cycle cameras unless the user recently chose one
   autoTimer += dt;
-  if (autoTimer > 11 && perfTime - lastUserSwitch > 26) {
+  if (!st && autoTimer > 11 && perfTime - lastUserSwitch > 26) {
     autoTimer = 0;
     camMode = (camMode + 1) % 4;
     tracksideS = null;
     smoothedPos = null;
   }
-
-  const kmh = updateCamera(dt, perfTime);
+  const kmh = updateCamera(dt, perfTime, st);
   extras.update(dt);
   traffic.update(dt);
   autoQuality(dt);
@@ -300,8 +334,18 @@ function loop(now) {
   }
 
   // HUD
-  elSpeed.textContent = String(Math.round(kmh + Math.sin(perfTime * 9) * 1.4));
+  elSpeed.textContent = String(Math.round(st ? kmh : kmh + Math.sin(perfTime * 9) * 1.4));
   elCam.textContent = CAM_NAMES[camMode];
+  const toast = drive.consumePadToast();
+  if (toast) { elPrompt.textContent = '🎮 HANDKONTROLL ANSLUTEN'; promptTimer = toast; }
+  if (promptTimer > 0) {
+    promptTimer -= dt;
+    if (promptTimer <= 0) elPrompt.textContent = drive.playing ? '' : ATTRACT_PROMPT;
+  } else if (!drive.playing && elPrompt.textContent !== ATTRACT_PROMPT) {
+    elPrompt.textContent = ATTRACT_PROMPT;
+  } else if (drive.playing && promptTimer <= 0 && elPrompt.textContent === ATTRACT_PROMPT) {
+    elPrompt.textContent = '';
+  }
   fpsAcc += dt; fpsN++; fpsTimer += dt;
   if (fpsTimer > 0.5) {
     elFps.textContent = `${Math.round(fpsN / fpsAcc)} FPS`;
@@ -312,5 +356,12 @@ function loop(now) {
     firstFrame = false;
     document.getElementById('loader').classList.add('done');
   }
+
+  // debug handle for automated testing
+  window.__dbg = {
+    cam: camera.position.toArray().map((n) => +n.toFixed(1)),
+    car: st ? st.pos.toArray().map((n) => +n.toFixed(1)) : null,
+    kmh: Math.round(kmh), tier, playing: drive.playing,
+  };
 }
 requestAnimationFrame(loop);
