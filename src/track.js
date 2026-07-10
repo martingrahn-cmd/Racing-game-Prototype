@@ -5,7 +5,7 @@ import {
   makeFenceTexture, makeBannerAtlas, makeManholeTexture, makeSkidTexture,
   makeGlowPoolTexture, mulberry32,
 } from './textures.js';
-import { registerEmissive, registerOpacity } from './night.js';
+import { registerEmissive, registerOpacity, registerCustom } from './night.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 
@@ -129,10 +129,13 @@ export function buildTrack(scene) {
     (() => {
       const m = new THREE.MeshStandardMaterial({
         map: roadTex.map, normalMap: roadTex.normalMap, roughnessMap: roadTex.roughnessMap,
+        emissiveMap: roadTex.emissiveMap, emissive: 0xffffff,
         normalScale: new THREE.Vector2(0.5, 0.5), roughness: 1.0, metalness: 0.0,
       });
       m.envMapIntensity = 0.22; // keep the blue sky reflection subtle on asphalt
       m.userData.keepEnv = true;
+      registerEmissive(m, 0, 1.15); // retroreflective lane paint
+      registerCustom((d) => { m.roughness = 0.62 + 0.38 * d; }); // moonlight sheen at night
       return m;
     })()
   );
@@ -170,7 +173,11 @@ export function buildTrack(scene) {
       }
     }
   }
-  const racingKerbMat = new THREE.MeshStandardMaterial({ map: makeKerbTexture(), roughness: 0.7 });
+  const kerbNightTex = makeKerbTexture();
+  const racingKerbMat = new THREE.MeshStandardMaterial({
+    map: kerbNightTex, emissiveMap: kerbNightTex, emissive: 0xffffff, roughness: 0.7,
+  });
+  registerEmissive(racingKerbMat, 0, 0.55); // kerb paint reads at night too
   const racingKerbs = [];
   for (const [a, b] of cornerSpans) {
     const n = Math.max(10, Math.floor((b - a) / 2));
@@ -299,7 +306,7 @@ export function buildTrack(scene) {
   }
   const lampGeo = mergeGeoms(lampParts);
   const lampMat = new THREE.MeshStandardMaterial({ color: 0x3c4148, roughness: 0.55, metalness: 0.5 });
-  const lampSpacing = 56;
+  const lampSpacing = 38;
   const lampCount = Math.floor(length / lampSpacing);
   const lamps = new THREE.InstancedMesh(lampGeo, lampMat, lampCount);
   lamps.frustumCulled = false;
@@ -315,8 +322,8 @@ export function buildTrack(scene) {
     color: 0xffd9a0, blending: THREE.AdditiveBlending,
     polygonOffset: true, polygonOffsetFactor: -2,
   });
-  registerOpacity(poolMat, 0, 0.5);
-  const poolGeo = new THREE.PlaneGeometry(7.5, 7.5);
+  registerOpacity(poolMat, 0, 0.85);
+  const poolGeo = new THREE.PlaneGeometry(11, 11);
   poolGeo.rotateX(-Math.PI / 2);
   const pools = new THREE.InstancedMesh(poolGeo, poolMat, lampCount);
   pools.frustumCulled = false;

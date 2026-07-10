@@ -74,7 +74,7 @@ export function createDayNight({ scene, sky, sun, hemi, post }) {
       sun.intensity = 3.1 * d + params.moonIntensity * (1 - d);
       c1.copy(MOON_COL).lerp(SUN_WARM, d).lerp(SUN_SET, twilight * d * 0.75);
       sun.color.copy(c1);
-      hemi.intensity = 0.22 + 0.64 * d;
+      hemi.intensity = 0.3 + 0.56 * d; // city-glow floor keeps the road readable
       hemi.color.copy(c2.copy(HEMI_NIGHT_SKY).lerp(HEMI_DAY_SKY, d));
       hemi.groundColor.copy(c2.copy(HEMI_NIGHT_GND).lerp(HEMI_DAY_GND, d));
 

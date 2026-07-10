@@ -5,6 +5,7 @@
 const emissives = []; // {mat, day, night}
 const opacities = []; // {mat, day, night}
 const lights = [];    // {light, day, night}
+const customs = [];   // fn(dayness)
 
 export function registerEmissive(mat, day, night) {
   emissives.push({ mat, day, night });
@@ -21,10 +22,16 @@ export function registerLight(light, day, night) {
   light.intensity = day;
 }
 
+export function registerCustom(fn) {
+  customs.push(fn);
+  fn(1);
+}
+
 // nightScale lets a global slider (e.g. headlight intensity) scale a group
 export function applyDayness(d) {
   const n = 1 - d;
   for (const e of emissives) e.mat.emissiveIntensity = e.day * d + e.night * n;
   for (const o of opacities) o.mat.opacity = o.day * d + o.night * n;
   for (const l of lights) l.light.intensity = l.day * d + l.night * n;
+  for (const f of customs) f(d);
 }

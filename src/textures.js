@@ -75,10 +75,12 @@ export function makeRoadTexture() {
   const c = canvas(w, h), x = c.getContext('2d');
   const hc = canvas(w, h), hx = hc.getContext('2d');
   const rc = canvas(w, h), rx = rc.getContext('2d');
+  const lc = canvas(w, h), lx = lc.getContext('2d'); // retroreflective paint (night emissive)
 
   x.fillStyle = '#4a4b4f'; x.fillRect(0, 0, w, h);
   hx.fillStyle = gray(128); hx.fillRect(0, 0, w, h);
   rx.fillStyle = gray(238); rx.fillRect(0, 0, w, h); // rough asphalt
+  lx.fillStyle = '#000000'; lx.fillRect(0, 0, w, h);
 
   noiseFill(x, w, h, 0.10, rng);
   noiseFill(hx, w, h, 0.35, rng);
@@ -101,6 +103,7 @@ export function makeRoadTexture() {
     x.fillStyle = '#eeeadf'; x.fillRect(px, py, pw, ph);
     hx.fillStyle = gray(150); hx.fillRect(px, py, pw, ph);
     rx.fillStyle = gray(140); rx.fillRect(px, py, pw, ph); // paint is smoother
+    lx.fillStyle = '#d8d4c4'; lx.fillRect(px, py, pw, ph); // glows softly at night
   };
   // edge lines
   paint(0.035 * w, 0, 9, h);
@@ -129,7 +132,10 @@ export function makeRoadTexture() {
     x.fillStyle = 'rgba(20,20,22,0.5)'; x.fillRect(0, py, w, 3);
     rx.fillStyle = gray(90); rx.fillRect(0, py, w, 3);
   }
-  return { map: toTexture(c), normalMap: normalFromHeight(hc, 1.6), roughnessMap: toTexture(rc, { srgb: false }) };
+  return {
+    map: toTexture(c), normalMap: normalFromHeight(hc, 1.6),
+    roughnessMap: toTexture(rc, { srgb: false }), emissiveMap: toTexture(lc),
+  };
 }
 
 // ---------------------------------------------------------------- kerbs
