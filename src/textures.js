@@ -1,4 +1,6 @@
 // Procedural textures — everything is drawn in code, no image assets.
+// Facades and the road also generate height-derived normal maps and
+// roughness maps so surfaces respond to light like PS3/PS4-era materials.
 import * as THREE from 'three';
 
 function canvas(w, h) {
@@ -37,52 +39,101 @@ function noiseFill(ctx, w, h, alpha, rng) {
   ctx.restore();
 }
 
+// Tangent-space normal map from a grayscale height canvas (wrapping edges).
+function normalFromHeight(hc, strength = 2.5) {
+  const w = hc.width, h = hc.height;
+  const src = hc.getContext('2d').getImageData(0, 0, w, h).data;
+  const out = canvas(w, h);
+  const octx = out.getContext('2d');
+  const img = octx.createImageData(w, h);
+  const H = (x, y) => src[(((y + h) % h) * w + ((x + w) % w)) * 4] / 255;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const dx = (H(x - 1, y) - H(x + 1, y)) * strength;
+      const dy = (H(x, y + 1) - H(x, y - 1)) * strength; // v is up = canvas y down
+      const inv = 1 / Math.hypot(dx, dy, 1);
+      const k = (y * w + x) * 4;
+      img.data[k] = (dx * inv * 0.5 + 0.5) * 255;
+      img.data[k + 1] = (dy * inv * 0.5 + 0.5) * 255;
+      img.data[k + 2] = (inv * 0.5 + 0.5) * 255;
+      img.data[k + 3] = 255;
+    }
+  }
+  octx.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(out);
+  t.wrapS = THREE.RepeatWrapping; t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = 4;
+  return t;
+}
+
+function gray(v) { return `rgb(${v},${v},${v})`; }
+
 // ---------------------------------------------------------------- asphalt
 export function makeRoadTexture() {
   const rng = mulberry32(11);
   const w = 512, h = 512;
   const c = canvas(w, h), x = c.getContext('2d');
+  const hc = canvas(w, h), hx = hc.getContext('2d');
+  const rc = canvas(w, h), rx = rc.getContext('2d');
 
-  x.fillStyle = '#4a4b4f';
-  x.fillRect(0, 0, w, h);
+  x.fillStyle = '#4a4b4f'; x.fillRect(0, 0, w, h);
+  hx.fillStyle = gray(128); hx.fillRect(0, 0, w, h);
+  rx.fillStyle = gray(238); rx.fillRect(0, 0, w, h); // rough asphalt
+
   noiseFill(x, w, h, 0.10, rng);
+  noiseFill(hx, w, h, 0.35, rng);
 
-  // tire-polished darker bands in each lane
-  const grad = (u, spread) => {
-    const g = x.createLinearGradient((u - spread) * w, 0, (u + spread) * w, 0);
+  // tire-polished darker bands in each lane (smoother = subtle sheen)
+  const band = (ctx, u, spread, rgba) => {
+    const g = ctx.createLinearGradient((u - spread) * w, 0, (u + spread) * w, 0);
     g.addColorStop(0, 'rgba(0,0,0,0)');
-    g.addColorStop(0.5, 'rgba(15,15,18,0.35)');
+    g.addColorStop(0.5, rgba);
     g.addColorStop(1, 'rgba(0,0,0,0)');
-    x.fillStyle = g;
-    x.fillRect(0, 0, w, h);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
   };
-  grad(0.28, 0.10); grad(0.72, 0.10);
+  band(x, 0.28, 0.10, 'rgba(15,15,18,0.35)');
+  band(x, 0.72, 0.10, 'rgba(15,15,18,0.35)');
+  band(rx, 0.28, 0.10, 'rgba(150,150,150,0.55)');
+  band(rx, 0.72, 0.10, 'rgba(150,150,150,0.55)');
 
+  const paint = (px, py, pw, ph) => {
+    x.fillStyle = '#eeeadf'; x.fillRect(px, py, pw, ph);
+    hx.fillStyle = gray(150); hx.fillRect(px, py, pw, ph);
+    rx.fillStyle = gray(140); rx.fillRect(px, py, pw, ph); // paint is smoother
+  };
   // edge lines
-  x.fillStyle = '#eeeadf';
-  x.fillRect(0.035 * w, 0, 9, h);
-  x.fillRect(0.965 * w - 9, 0, 9, h);
-
+  paint(0.035 * w, 0, 9, h);
+  paint(0.965 * w - 9, 0, 9, h);
   // dashed centre line
-  for (let y = 0; y < h; y += 128) {
-    x.fillRect(w / 2 - 5, y, 10, 72);
-  }
+  for (let y = 0; y < h; y += 128) paint(w / 2 - 5, y, 10, 72);
 
-  // faint cracks
-  x.strokeStyle = 'rgba(0,0,0,0.18)';
-  x.lineWidth = 1;
+  // faint cracks (grooves in the height map)
   for (let i = 0; i < 10; i++) {
-    x.beginPath();
     let px = rng() * w, py = rng() * h;
-    x.moveTo(px, py);
-    for (let k = 0; k < 6; k++) { px += (rng() - 0.5) * 60; py += rng() * 40; x.lineTo(px, py); }
-    x.stroke();
+    const stroke = (ctx, style, lw) => {
+      ctx.strokeStyle = style; ctx.lineWidth = lw;
+      ctx.beginPath(); ctx.moveTo(px, py);
+      let qx = px, qy = py;
+      for (let k = 0; k < 6; k++) { qx += (rng() - 0.5) * 60; qy += rng() * 40; ctx.lineTo(qx, qy); }
+      ctx.stroke();
+    };
+    const sx = px, sy = py;
+    stroke(x, 'rgba(0,0,0,0.18)', 1);
+    px = sx; py = sy;
+    stroke(hx, gray(70), 1.5);
   }
-  return toTexture(c);
+  // tar seams (shiny dark lines)
+  for (let i = 0; i < 4; i++) {
+    const py = rng() * h;
+    x.fillStyle = 'rgba(20,20,22,0.5)'; x.fillRect(0, py, w, 3);
+    rx.fillStyle = gray(90); rx.fillRect(0, py, w, 3);
+  }
+  return { map: toTexture(c), normalMap: normalFromHeight(hc, 1.6), roughnessMap: toTexture(rc, { srgb: false }) };
 }
 
-// ---------------------------------------------------------------- kerb
-export function makeKerbTexture() {
+// ---------------------------------------------------------------- kerbs
+export function makeKerbTexture() { // red/white racing kerb (corners)
   const c = canvas(64, 128), x = c.getContext('2d');
   x.fillStyle = '#d8d3c8'; x.fillRect(0, 0, 64, 128);
   x.fillStyle = '#c23b2e'; x.fillRect(0, 0, 64, 64);
@@ -90,6 +141,19 @@ export function makeKerbTexture() {
   g.addColorStop(0, 'rgba(0,0,0,0.25)');
   g.addColorStop(0.4, 'rgba(0,0,0,0)');
   g.addColorStop(1, 'rgba(0,0,0,0.1)');
+  x.fillStyle = g; x.fillRect(0, 0, 64, 128);
+  return toTexture(c);
+}
+
+export function makeConcreteKerbTexture() { // plain city curb (straights)
+  const rng = mulberry32(17);
+  const c = canvas(64, 128), x = c.getContext('2d');
+  x.fillStyle = '#a8a49b'; x.fillRect(0, 0, 64, 128);
+  noiseFill(x, 64, 128, 0.09, rng);
+  const g = x.createLinearGradient(0, 0, 64, 0);
+  g.addColorStop(0, 'rgba(0,0,0,0.3)');
+  g.addColorStop(0.4, 'rgba(0,0,0,0)');
+  g.addColorStop(1, 'rgba(0,0,0,0.12)');
   x.fillStyle = g; x.fillRect(0, 0, 64, 128);
   return toTexture(c);
 }
@@ -115,7 +179,6 @@ export function makeGroundTexture() {
   const c = canvas(512, 512), x = c.getContext('2d');
   x.fillStyle = '#63615c'; x.fillRect(0, 0, 512, 512);
   noiseFill(x, 512, 512, 0.09, rng);
-  // block grid: lighter "streets"
   x.strokeStyle = 'rgba(146,142,134,0.85)';
   x.lineWidth = 10;
   for (let i = 0; i <= 512; i += 256) {
@@ -142,19 +205,24 @@ export function makeFenceTexture() {
     x.beginPath(); x.moveTo(i, 0); x.lineTo(i + 128, 128); x.stroke();
     x.beginPath(); x.moveTo(i + 128, 0); x.lineTo(i, 128); x.stroke();
   }
-  const t = toTexture(c, { srgb: true });
-  return t;
+  return toTexture(c);
 }
 
 // ---------------------------------------------------------------- building facades
-// Daylight look: windows read as darker glass with a sky-reflection gradient.
-function facadeBase(w, h, bg) {
-  const c = canvas(w, h), x = c.getContext('2d');
-  x.fillStyle = bg; x.fillRect(0, 0, w, h);
-  return { c, x };
+// Each facade produces {map, normalMap, roughnessMap}: windows are recessed
+// in the height map and smooth in the roughness map, so they catch sun and sky.
+function facadeSet(bg, wallRough = 200) {
+  const c = canvas(512, 512), x = c.getContext('2d');
+  const hc = canvas(512, 512), hx = hc.getContext('2d');
+  const rc = canvas(512, 512), rx = rc.getContext('2d');
+  x.fillStyle = bg; x.fillRect(0, 0, 512, 512);
+  hx.fillStyle = gray(220); hx.fillRect(0, 0, 512, 512);
+  rx.fillStyle = gray(wallRough); rx.fillRect(0, 0, 512, 512);
+  return { c, x, hc, hx, rc, rx };
 }
 
-function paintWindow(x, px, py, ww, wh, rng, glassTopBias) {
+function paintWindow(set, px, py, ww, wh, rng, glassTopBias, glassRough = 45) {
+  const { x, hx, rx } = set;
   const refl = 0.35 + rng() * 0.5;
   const g = x.createLinearGradient(px, py, px, py + wh);
   const top = Math.floor(120 + refl * 110 * glassTopBias);
@@ -163,100 +231,117 @@ function paintWindow(x, px, py, ww, wh, rng, glassTopBias) {
   g.addColorStop(1, `rgb(${bot},${bot + 6},${bot + 14})`);
   x.fillStyle = g;
   x.fillRect(px, py, ww, wh);
+  hx.fillStyle = gray(70); hx.fillRect(px, py, ww, wh);       // recessed
+  rx.fillStyle = gray(glassRough); rx.fillRect(px, py, ww, wh); // smooth glass
   if (rng() < 0.12) { // blinds / curtains
     x.fillStyle = 'rgba(215,208,190,0.8)';
-    x.fillRect(px, py, ww, wh * (0.3 + rng() * 0.5));
+    const bh = wh * (0.3 + rng() * 0.5);
+    x.fillRect(px, py, ww, bh);
+    rx.fillStyle = gray(180); rx.fillRect(px, py, ww, bh);
   }
 }
 
-// Ground-floor storefronts: dark glazing, awnings, signs (drawn at canvas bottom = v0).
-function paintStorefront(x, w, h, rng, band = 62) {
+// Ground-floor storefronts: dark glazing, awnings, signs (canvas bottom = v0).
+function paintStorefront(set, w, h, rng, band = 62) {
+  const { x, hx, rx } = set;
   const y0 = h - band;
-  x.fillStyle = '#22262c';
-  x.fillRect(0, y0, w, band);
+  x.fillStyle = '#22262c'; x.fillRect(0, y0, w, band);
+  hx.fillStyle = gray(60); hx.fillRect(0, y0, w, band);
+  rx.fillStyle = gray(55); rx.fillRect(0, y0, w, band);
   const shops = 5 + Math.floor(rng() * 3);
   const sw = w / shops;
   const awning = ['#7e3f39', '#3d5c48', '#41546e', '#8a7350', '#575463', '#4a4a4a'];
   for (let i = 0; i < shops; i++) {
     const sx = i * sw;
-    // window glow of interior
     x.fillStyle = `rgba(255,236,190,${0.10 + rng() * 0.25})`;
     x.fillRect(sx + 6, y0 + 18, sw - 12, band - 24);
-    // awning / sign band
     x.fillStyle = awning[Math.floor(rng() * awning.length)];
     x.fillRect(sx + 3, y0, sw - 6, 9);
-    // door
+    hx.fillStyle = gray(255); hx.fillRect(sx + 3, y0, sw - 6, 9); // awning sticks out
     x.fillStyle = 'rgba(10,12,14,0.9)';
     x.fillRect(sx + sw / 2 - 7, y0 + 26, 14, band - 26);
   }
 }
 
+function finishFacade(set, normalStrength = 2.2) {
+  return {
+    map: toTexture(set.c),
+    normalMap: normalFromHeight(set.hc, normalStrength),
+    roughnessMap: toTexture(set.rc, { srgb: false }),
+  };
+}
+
 // Glass office tower: full curtain wall.
 export function makeFacadeGlass() {
   const rng = mulberry32(101);
-  const { c, x } = facadeBase(512, 512, '#5e6e7c');
+  const set = facadeSet('#5e6e7c', 160);
+  const { x, hx } = set;
   const cols = 12, rows = 16;
   const cw = 512 / cols, rh = 512 / rows;
   for (let i = 0; i < cols; i++) {
     for (let j = 0; j < rows; j++) {
-      paintWindow(x, i * cw + 2, j * rh + 2, cw - 4, rh - 4, rng, 1.0);
+      paintWindow(set, i * cw + 2, j * rh + 2, cw - 4, rh - 4, rng, 1.0, 30);
     }
   }
-  // mullion highlights
   x.fillStyle = 'rgba(226,232,238,0.35)';
   for (let i = 0; i <= cols; i++) x.fillRect(i * cw - 1, 0, 2, 512);
+  hx.fillStyle = gray(255);
+  for (let i = 0; i <= cols; i++) hx.fillRect(i * cw - 1, 0, 2, 512);
   // lobby
-  x.fillStyle = '#1d2126';
-  x.fillRect(0, 512 - 40, 512, 40);
-  x.fillStyle = 'rgba(235,240,244,0.5)';
-  x.fillRect(0, 512 - 42, 512, 4);
-  return toTexture(c);
+  x.fillStyle = '#1d2126'; x.fillRect(0, 512 - 40, 512, 40);
+  x.fillStyle = 'rgba(235,240,244,0.5)'; x.fillRect(0, 512 - 42, 512, 4);
+  hx.fillStyle = gray(60); hx.fillRect(0, 512 - 40, 512, 40);
+  set.rx.fillStyle = gray(35); set.rx.fillRect(0, 512 - 40, 512, 40);
+  return finishFacade(set, 1.8);
 }
 
 // Concrete mid-rise with ribbon windows.
 export function makeFacadeRibbon() {
   const rng = mulberry32(202);
-  const { c, x } = facadeBase(512, 512, '#b3aa9a');
+  const set = facadeSet('#b3aa9a', 210);
+  const { x, hx } = set;
   noiseFill(x, 512, 512, 0.06, rng);
   const rows = 10, rh = 512 / rows;
   for (let j = 0; j < rows; j++) {
     const y0 = j * rh + rh * 0.22;
     const wh = rh * 0.52;
-    x.fillStyle = '#2e3844';
-    x.fillRect(0, y0, 512, wh);
+    x.fillStyle = '#2e3844'; x.fillRect(0, y0, 512, wh);
+    hx.fillStyle = gray(70); hx.fillRect(0, y0, 512, wh);
+    set.rx.fillStyle = gray(50); set.rx.fillRect(0, y0, 512, wh);
     for (let i = 0; i < 16; i++) {
-      paintWindow(x, i * 32 + 2, y0 + 2, 28, wh - 4, rng, 0.7);
+      paintWindow(set, i * 32 + 2, y0 + 2, 28, wh - 4, rng, 0.7, 45);
     }
-    // spandrel shadow line
-    x.fillStyle = 'rgba(0,0,0,0.22)';
-    x.fillRect(0, y0 + wh, 512, 4);
+    x.fillStyle = 'rgba(0,0,0,0.22)'; x.fillRect(0, y0 + wh, 512, 4);
   }
-  paintStorefront(x, 512, 512, rng);
-  return toTexture(c);
+  paintStorefront(set, 512, 512, rng);
+  return finishFacade(set);
 }
 
 // Residential: punched windows + balconies on plaster.
 export function makeFacadeResidential() {
   const rng = mulberry32(303);
-  const { c, x } = facadeBase(512, 512, '#cbb49a');
+  const set = facadeSet('#cbb49a', 225);
+  const { x, hx } = set;
   noiseFill(x, 512, 512, 0.07, rng);
   const cols = 8, rows = 8;
   const cw = 512 / cols, rh = 512 / rows;
   for (let i = 0; i < cols; i++) {
     for (let j = 0; j < rows; j++) {
       const px = i * cw + cw * 0.22, py = j * rh + rh * 0.18;
-      paintWindow(x, px, py, cw * 0.56, rh * 0.6, rng, 0.55);
+      paintWindow(set, px, py, cw * 0.56, rh * 0.6, rng, 0.55, 60);
       x.strokeStyle = 'rgba(70,60,50,0.6)';
       x.lineWidth = 2;
       x.strokeRect(px, py, cw * 0.56, rh * 0.6);
       if ((i + j * 3) % 4 === 0) { // balcony slab
         x.fillStyle = 'rgba(90,80,70,0.75)';
         x.fillRect(i * cw + cw * 0.12, j * rh + rh * 0.8, cw * 0.76, 6);
+        hx.fillStyle = gray(255);
+        hx.fillRect(i * cw + cw * 0.12, j * rh + rh * 0.8, cw * 0.76, 6);
       }
     }
   }
-  paintStorefront(x, 512, 512, rng, 56);
-  return toTexture(c);
+  paintStorefront(set, 512, 512, rng, 56);
+  return finishFacade(set);
 }
 
 // ---------------------------------------------------------------- roof
@@ -293,7 +378,6 @@ export function makeBannerAtlas() {
     x.fillStyle = bg;
     x.fillRect(0, y, 1024, rowH);
     if (r === 0) {
-      // checkered start banner
       const s = 32;
       for (let i = 0; i < 1024 / s; i++) {
         for (let j = 0; j < rowH / s; j++) {
@@ -307,7 +391,6 @@ export function makeBannerAtlas() {
       x.textAlign = 'center'; x.textBaseline = 'middle';
       x.fillText('START', 512, y + 66);
     } else {
-      // speed stripes
       x.fillStyle = 'rgba(255,255,255,0.10)';
       for (let i = -2; i < 12; i++) {
         x.beginPath();
@@ -321,8 +404,81 @@ export function makeBannerAtlas() {
       x.fillText(BANNERS[r], 512, y + 66);
     }
   }
-  const t = toTexture(c, { repeat: false });
-  return t;
+  return toTexture(c, { repeat: false });
+}
+
+// ---------------------------------------------------------------- wall ads (2x2 atlas)
+export function makeAdsAtlas() {
+  const rng = mulberry32(606);
+  const c = canvas(512, 512), x = c.getContext('2d');
+  const ads = [
+    { bg: '#d8262c', fg: '#ffffff', text: 'APEX', sub: 'RACING TEAM' },
+    { bg: '#123c6e', fg: '#ffd94a', text: 'NITRO', sub: 'FUEL & CO' },
+    { bg: '#0e0f12', fg: '#5ad1ff', text: 'SKYLINE', sub: '98.5 FM' },
+    { bg: '#f2ede2', fg: '#c8102e', text: 'VELOCITA', sub: 'TYRES' },
+  ];
+  ads.forEach((a, i) => {
+    const ox = (i % 2) * 256, oy = Math.floor(i / 2) * 256;
+    x.fillStyle = a.bg; x.fillRect(ox, oy, 256, 256);
+    // diagonal accent
+    x.fillStyle = 'rgba(255,255,255,0.09)';
+    x.beginPath();
+    x.moveTo(ox, oy + 256); x.lineTo(ox + 130, oy); x.lineTo(ox + 200, oy); x.lineTo(ox + 70, oy + 256);
+    x.fill();
+    x.fillStyle = a.fg;
+    x.textAlign = 'center';
+    x.font = 'italic 900 52px system-ui, sans-serif';
+    x.textBaseline = 'middle';
+    x.fillText(a.text, ox + 128, oy + 108);
+    x.font = '700 22px system-ui, sans-serif';
+    x.fillText(a.sub, ox + 128, oy + 158);
+    // frame
+    x.strokeStyle = 'rgba(0,0,0,0.55)';
+    x.lineWidth = 10;
+    x.strokeRect(ox + 5, oy + 5, 246, 246);
+  });
+  return toTexture(c, { repeat: false });
+}
+
+// ---------------------------------------------------------------- road decals
+export function makeManholeTexture() {
+  const c = canvas(64, 64), x = c.getContext('2d');
+  x.clearRect(0, 0, 64, 64);
+  x.fillStyle = '#2c2d30';
+  x.beginPath(); x.arc(32, 32, 28, 0, Math.PI * 2); x.fill();
+  x.strokeStyle = '#1a1b1d'; x.lineWidth = 3;
+  x.beginPath(); x.arc(32, 32, 24, 0, Math.PI * 2); x.stroke();
+  x.lineWidth = 2;
+  for (let i = -2; i <= 2; i++) {
+    x.beginPath(); x.moveTo(12, 32 + i * 8); x.lineTo(52, 32 + i * 8); x.stroke();
+  }
+  return toTexture(c, { repeat: false });
+}
+
+export function makeSkidTexture() {
+  const c = canvas(64, 256), x = c.getContext('2d');
+  x.clearRect(0, 0, 64, 256);
+  for (const cx of [18, 46]) {
+    const g = x.createLinearGradient(0, 0, 0, 256);
+    g.addColorStop(0, 'rgba(12,12,14,0)');
+    g.addColorStop(0.3, 'rgba(12,12,14,0.4)');
+    g.addColorStop(0.7, 'rgba(12,12,14,0.4)');
+    g.addColorStop(1, 'rgba(12,12,14,0)');
+    x.fillStyle = g;
+    x.fillRect(cx - 7, 0, 14, 256);
+  }
+  return toTexture(c); // wraps: skids fade in/out repeatedly along the span
+}
+
+export function makeContactShadowTexture() {
+  const c = canvas(128, 128), x = c.getContext('2d');
+  const g = x.createRadialGradient(64, 64, 8, 64, 64, 62);
+  g.addColorStop(0, 'rgba(0,0,0,0.5)');
+  g.addColorStop(0.55, 'rgba(0,0,0,0.38)');
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  x.fillStyle = g;
+  x.fillRect(0, 0, 128, 128);
+  return toTexture(c, { repeat: false });
 }
 
 // ---------------------------------------------------------------- soft cloud sprite
@@ -339,6 +495,5 @@ export function makeCloudTexture() {
     x.fillStyle = g;
     x.beginPath(); x.arc(px, py, r, 0, Math.PI * 2); x.fill();
   }
-  const t = toTexture(c, { repeat: false });
-  return t;
+  return toTexture(c, { repeat: false });
 }

@@ -4,14 +4,29 @@ import * as THREE from 'three';
 import { buildTrack, frameAt } from './track.js';
 import { buildCity } from './city.js';
 import { buildSky, SUN_DIR } from './sky.js';
+import { createPost } from './post.js';
 
 // ------------------------------------------------------------ renderer
 const canvas = document.getElementById('game');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.12;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+// Post pipeline does tonemapping/grading in HDR; fall back to direct
+// ACES rendering when unavailable (WebGL1).
+const post = createPost(renderer);
+let postEnabled = !!post;
+if (!postEnabled) {
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.12;
+}
+function setDirectToneMapping(on) {
+  renderer.toneMapping = on ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping;
+  renderer.toneMappingExposure = 1.12;
+  scene.traverse((o) => {
+    if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => (m.needsUpdate = true));
+  });
+}
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0xdfe9f2, 260, 3100);
@@ -29,7 +44,7 @@ sun.shadow.bias = -0.0004;
 sun.shadow.normalBias = 0.6;
 scene.add(sun, sun.target);
 
-const hemi = new THREE.HemisphereLight(0xbdd4f2, 0x8c8377, 0.7);
+const hemi = new THREE.HemisphereLight(0xc6d5ea, 0x9a8d7d, 0.85);
 scene.add(hemi);
 
 // ------------------------------------------------------------ world
@@ -45,8 +60,10 @@ buildCity(scene, curve, length);
   const env = pmrem.fromScene(skyScene, 0.04, 1, 4000);
   scene.environment = env.texture;
   scene.traverse((o) => {
-    if (o.material && o.material.isMeshStandardMaterial) o.material.envMapIntensity = 0.5;
-    if (Array.isArray(o.material)) o.material.forEach((m) => { if (m.isMeshStandardMaterial) m.envMapIntensity = 0.5; });
+    const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
+    for (const m of mats) {
+      if (m.isMeshStandardMaterial && !m.userData.keepEnv) m.envMapIntensity = 0.5;
+    }
   });
   pmrem.dispose();
 }
@@ -176,15 +193,21 @@ canvas.addEventListener('pointerdown', (e) => {
 
 // ------------------------------------------------------------ adaptive quality
 const TIERS = [
-  { pr: 2.0, shadows: 2048 },
-  { pr: 1.5, shadows: 2048 },
-  { pr: 1.25, shadows: 1024 },
-  { pr: 1.0, shadows: 0 },
+  { pr: 2.0, shadows: 2048, post: true },
+  { pr: 1.5, shadows: 2048, post: true },
+  { pr: 1.25, shadows: 1024, post: true },
+  { pr: 1.0, shadows: 1024, post: false },
+  { pr: 1.0, shadows: 0, post: false },
 ];
 let tier = 0;
 function applyTier() {
   const t = TIERS[tier];
   renderer.setPixelRatio(Math.min(devicePixelRatio, t.pr));
+  const wantPost = t.post && !!post;
+  if (wantPost !== postEnabled) {
+    postEnabled = wantPost;
+    setDirectToneMapping(!wantPost);
+  }
   const wantShadows = t.shadows > 0;
   if (renderer.shadowMap.enabled !== wantShadows) {
     renderer.shadowMap.enabled = wantShadows;
@@ -195,6 +218,7 @@ function applyTier() {
     sun.shadow.mapSize.set(t.shadows, t.shadows);
     if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
   }
+  resize();
 }
 applyTier();
 
@@ -211,6 +235,7 @@ function resize() {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight, false); // CSS keeps the canvas full-screen
+  if (post) post.setSize(innerWidth, innerHeight, renderer.getPixelRatio());
 }
 addEventListener('resize', resize);
 resize();
@@ -244,7 +269,12 @@ function loop(now) {
 
   const kmh = updateCamera(dt, perfTime);
   autoQuality(dt);
-  renderer.render(scene, camera);
+  if (postEnabled) {
+    const sf = (kmh - 90) / 210;
+    post.render(scene, camera, camMode === 3 ? 0 : sf, perfTime);
+  } else {
+    renderer.render(scene, camera);
+  }
 
   // HUD
   elSpeed.textContent = String(Math.round(kmh + Math.sin(perfTime * 9) * 1.4));

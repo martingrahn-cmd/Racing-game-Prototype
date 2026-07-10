@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import {
   makeFacadeGlass, makeFacadeRibbon, makeFacadeResidential,
-  makeRoofTexture, makeGroundTexture, mulberry32,
+  makeRoofTexture, makeGroundTexture, makeAdsAtlas, makeContactShadowTexture, mulberry32,
 } from './textures.js';
 import { frameAt, mergeGeoms, ROAD_HALF } from './track.js';
 
@@ -45,7 +45,7 @@ const CLASSES = [
     geo: () => buildingGeometry(1, 1),
     tex: makeFacadeGlass,
     tints: [0xcfe0ea, 0xb8ccd8, 0xdce8f0, 0xaebfd4, 0xc4d8d2],
-    rough: 0.35, metal: 0.25,
+    rough: 0.35, metal: 0.45,
   },
 ];
 
@@ -77,8 +77,22 @@ export function buildCity(scene, curve, length) {
     return true;
   };
 
-  const placements = [[], [], []]; // per class: {pos, yaw, sx, sy, sz, tint}
+  const placements = [[], [], []]; // per class: {x, y?, z, yaw, sx, sy, sz, tint}
   const treeSpots = [];
+  const billboards = []; // {x, z, yaw, w, h, y, ad}
+  const antennas = [];   // {x, z, y, h}
+
+  const maybeCrown = (b, cls, rngv) => {
+    // tall towers get a setback crown + sometimes an antenna
+    if (cls === 2 && b.sy > 46 && rngv < 0.6) {
+      placements[2].push({
+        ...b, y: b.sy, sx: b.sx * 0.62, sz: b.sz * 0.62, sy: b.sy * 0.3,
+      });
+      if (rngv < 0.35) antennas.push({ x: b.x, z: b.z, y: b.sy * 1.3, h: 5 + rngv * 20 });
+    } else if (cls === 2 && b.sy > 60) {
+      antennas.push({ x: b.x, z: b.z, y: b.sy, h: 6 + rngv * 14 });
+    }
+  };
 
   // --- street wall: buildings fronting the circuit --------------------------
   const slot = 17;
@@ -104,10 +118,23 @@ export function buildCity(scene, curve, length) {
       const off = ROAD_HALF + 5.6 + d / 2 + rng() * 6;
       const x = p.x + r.x * side * off, z = p.z + r.z * side * off;
       if (!minRoadDist(x, z, Math.max(w, d) * 0.5 + ROAD_HALF + 4.2)) continue;
-      placements[cls].push({
+      const b = {
         x, z, yaw, sx: w, sy: heightFor(cls, rng, dt), sz: d,
         tint: CLASSES[cls].tints[Math.floor(rng() * CLASSES[cls].tints.length)],
-      });
+      };
+      placements[cls].push(b);
+      maybeCrown(b, cls, rng());
+      // wall ad facing the track
+      if (cls >= 1 && b.sy > 13 && rng() < 0.24) {
+        const face = off - d / 2 - 0.18;
+        const v = { x: -side * r.x, z: -side * r.z }; // toward road
+        billboards.push({
+          x: p.x + r.x * side * face, z: p.z + r.z * side * face,
+          yaw: Math.atan2(v.x, v.z),
+          w: 4.5 + rng() * 2.5, y: 7.5 + rng() * Math.min(b.sy - 11, 9),
+          ad: Math.floor(rng() * 4),
+        });
+      }
     }
   }
 
@@ -119,11 +146,13 @@ export function buildCity(scene, curve, length) {
     if (!minRoadDist(x, z, Math.max(w, d) * 0.72 + ROAD_HALF + 5)) continue;
     const dt = Math.max(0, 1 - Math.hypot(x - DOWNTOWN.x, z - DOWNTOWN.y) / 520) * 0.8;
     const cls = pickClass(rng, dt);
-    placements[cls].push({
+    const b = {
       x, z, yaw: Math.floor(rng() * 4) * (Math.PI / 2) + 0.12,
       sx: w, sy: heightFor(cls, rng, dt) * (0.8 + dt * 0.9), sz: d,
       tint: CLASSES[cls].tints[Math.floor(rng() * CLASSES[cls].tints.length)],
-    });
+    };
+    placements[cls].push(b);
+    maybeCrown(b, cls, rng());
   }
 
   // --- create instanced meshes ---------------------------------------------
@@ -134,8 +163,11 @@ export function buildCity(scene, curve, length) {
     const list = placements[cls];
     if (!list.length) continue;
     const spec = CLASSES[cls];
+    const f = spec.tex();
     const facadeMat = new THREE.MeshStandardMaterial({
-      map: spec.tex(), roughness: spec.rough, metalness: spec.metal,
+      map: f.map, normalMap: f.normalMap, roughnessMap: f.roughnessMap,
+      normalScale: new THREE.Vector2(0.8, 0.8),
+      roughness: spec.rough, metalness: spec.metal,
     });
     const roofMat = new THREE.MeshStandardMaterial({ map: roofTex, roughness: 0.95 });
     const mesh = new THREE.InstancedMesh(spec.geo(), [facadeMat, roofMat], list.length);
@@ -143,7 +175,7 @@ export function buildCity(scene, curve, length) {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     list.forEach((b, i) => {
-      dummy.position.set(b.x, 0, b.z);
+      dummy.position.set(b.x, b.y || 0, b.z);
       dummy.rotation.set(0, b.yaw, 0);
       dummy.scale.set(b.sx, b.sy, b.sz);
       dummy.updateMatrix();
@@ -154,6 +186,43 @@ export function buildCity(scene, curve, length) {
     scene.add(mesh);
   }
 
+  // --- rooftop antennas -------------------------------------------------------
+  if (antennas.length) {
+    const ag = new THREE.CylinderGeometry(0.06, 0.14, 1, 5);
+    ag.translate(0, 0.5, 0);
+    const am = new THREE.InstancedMesh(ag, new THREE.MeshStandardMaterial({ color: 0x33373d, roughness: 0.6 }), antennas.length);
+    am.frustumCulled = false;
+    antennas.forEach((a, i) => {
+      dummy.position.set(a.x, a.y, a.z);
+      dummy.rotation.set(0, 0, 0);
+      dummy.scale.set(1, a.h, 1);
+      dummy.updateMatrix();
+      am.setMatrixAt(i, dummy.matrix);
+    });
+    scene.add(am);
+  }
+
+  // --- wall ads (merged planes with atlas UVs, slightly emissive) -------------
+  if (billboards.length) {
+    const adsTex = makeAdsAtlas();
+    const adGeos = billboards.map((b) => {
+      const g = new THREE.PlaneGeometry(b.w, b.w * 0.75);
+      const uvA = g.attributes.uv;
+      const u0 = (b.ad % 2) * 0.5, v0 = 0.5 - Math.floor(b.ad / 2) * 0.5;
+      for (let i = 0; i < uvA.count; i++) {
+        uvA.setXY(i, u0 + uvA.getX(i) * 0.5, v0 + uvA.getY(i) * 0.5);
+      }
+      g.rotateY(b.yaw);
+      g.translate(b.x, b.y, b.z);
+      return g;
+    });
+    const adMesh = new THREE.Mesh(mergeGeoms(adGeos), new THREE.MeshStandardMaterial({
+      map: adsTex, emissiveMap: adsTex, emissive: 0xffffff, emissiveIntensity: 0.42,
+      roughness: 0.55,
+    }));
+    scene.add(adMesh);
+  }
+
   // --- trees ----------------------------------------------------------------
   for (let i = 0; i < 260; i++) { // extra scattered park trees
     const x = DOWNTOWN.x + (rng() - 0.5) * 900;
@@ -162,17 +231,21 @@ export function buildCity(scene, curve, length) {
     if (rng() < 0.5) treeSpots.push({ x, z });
   }
   if (treeSpots.length) {
-    const trunk = new THREE.CylinderGeometry(0.14, 0.2, 1.7, 6);
-    trunk.translate(0, 0.85, 0);
-    const crown = new THREE.IcosahedronGeometry(1.35, 1);
-    crown.scale(1, 1.25, 1);
-    crown.translate(0, 2.7, 0);
-    // vertex colors: trunk brown, crown green
-    const paint = (g, hex) => {
-      const n = g.attributes.position.count;
+    // organic canopy: several jittered leaf blobs, darker toward the bottom
+    const paint = (g, hex, shade = 0) => {
+      const pos = g.attributes.position;
+      const n = pos.count;
       const col = new Float32Array(n * 3);
       const c = new THREE.Color(hex);
-      for (let i = 0; i < n; i++) { col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
+      const bb = g.boundingBox || (g.computeBoundingBox(), g.boundingBox);
+      for (let i = 0; i < n; i++) {
+        let f = 1;
+        if (shade) {
+          const t = (pos.getY(i) - bb.min.y) / (bb.max.y - bb.min.y);
+          f = 0.55 + t * 0.55;
+        }
+        col[i * 3] = c.r * f; col[i * 3 + 1] = c.g * f; col[i * 3 + 2] = c.b * f;
+      }
       g.setAttribute('color', new THREE.BufferAttribute(col, 3));
       if (!g.index) {
         const idx = []; for (let i = 0; i < n; i++) idx.push(i);
@@ -180,9 +253,35 @@ export function buildCity(scene, curve, length) {
       }
       return g;
     };
+    const jitter = (g, amt, rngj) => {
+      const pos = g.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        pos.setXYZ(i,
+          pos.getX(i) + (rngj() - 0.5) * amt,
+          pos.getY(i) + (rngj() - 0.5) * amt,
+          pos.getZ(i) + (rngj() - 0.5) * amt);
+      }
+      g.computeVertexNormals();
+      return g;
+    };
+    const rngT = mulberry32(4242);
+    const trunk = new THREE.CylinderGeometry(0.13, 0.22, 1.9, 6);
+    trunk.translate(0, 0.95, 0);
     paint(trunk, 0x6b4a32);
-    paint(crown, 0x4d7a3a);
-    const treeGeo = mergeGeoms([trunk, crown]);
+    const blobs = [trunk];
+    const blobSpec = [
+      [0, 2.8, 0, 1.25], [0.8, 2.3, 0.3, 0.85], [-0.7, 2.45, -0.25, 0.8],
+      [0.15, 2.2, -0.75, 0.75], [-0.2, 3.5, 0.2, 0.8],
+    ];
+    for (const [bx, by, bz, br] of blobSpec) {
+      const blob = new THREE.IcosahedronGeometry(br, 2);
+      jitter(blob, br * 0.22, rngT);
+      blob.translate(bx, by, bz);
+      blob.computeBoundingBox();
+      paint(blob, 0x527c3c, 1);
+      blobs.push(blob);
+    }
+    const treeGeo = mergeGeoms(blobs);
     const treeMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 });
     const trees = new THREE.InstancedMesh(treeGeo, treeMat, treeSpots.length);
     trees.frustumCulled = false;
@@ -198,6 +297,35 @@ export function buildCity(scene, curve, length) {
     });
     trees.instanceColor.needsUpdate = true;
     scene.add(trees);
+  }
+
+  // --- contact shadows (fake AO where buildings & trees meet the ground) ----
+  {
+    const spots = [];
+    for (const list of placements) {
+      for (const b of list) {
+        if (b.y) continue; // crowns sit on towers, not the ground
+        spots.push({ x: b.x, z: b.z, yaw: b.yaw, sx: b.sx * 1.5, sz: b.sz * 1.5 });
+      }
+    }
+    for (const t of treeSpots) spots.push({ x: t.x, z: t.z, yaw: 0, sx: 4.2, sz: 4.2 });
+    const g = new THREE.PlaneGeometry(1, 1);
+    g.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({
+      map: makeContactShadowTexture(), transparent: true, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -2,
+    });
+    const cs = new THREE.InstancedMesh(g, mat, spots.length);
+    cs.frustumCulled = false;
+    cs.renderOrder = 1;
+    spots.forEach((sp, i) => {
+      dummy.position.set(sp.x, 0.045, sp.z);
+      dummy.rotation.set(0, sp.yaw, 0);
+      dummy.scale.set(sp.sx, 1, sp.sz);
+      dummy.updateMatrix();
+      cs.setMatrixAt(i, dummy.matrix);
+    });
+    scene.add(cs);
   }
 
   // --- ground ---------------------------------------------------------------

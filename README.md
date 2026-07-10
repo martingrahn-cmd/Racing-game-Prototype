@@ -40,8 +40,15 @@ URL-parametrar för felsökning: `?s=520&cam=2&speed=4` (position på banan, kam
 - ~1500 byggnader som `InstancedMesh` (3 fasadtyper × procedurella canvas-texturer),
   butiksfasader i gatuplan, tak med egen material-grupp
 - Sol + skuggkarta som följer kameran, himmel i shader, IBL via PMREM från himlen,
-  ACES-tonemapping, avståndsdis och bergssiluetter för djup
-- Hela scenen ritas på ~30 draw calls — instansering + geometri-merge
+  avståndsdis och bergssiluetter för djup
+- **Post-processing i HDR** (egen pipeline, inga addons): bloom, radiell motion blur
+  i fart, chromatic aberration, ACES-tonemapping, färggradering, vinjett, filmkorn
+- **Materialdjup**: normal- och roughness-maps genereras ur höjdkartor i canvas —
+  fönster ligger infällda i fasaderna och glas fångar sol/himmel; asfalten har
+  polerade däckspårband, sprickor och tjärskarvar
+- Kontaktskuggor (fejk-AO) under alla byggnader och träd, tornavsatser med antenner,
+  väggreklamer, brunnslock, däckspår genom kurvorna, röd/vit kurvkantsten bara i kurvor
+- Hela scenen ritas på ~40 draw calls — instansering + geometri-merge
 - Adaptiv kvalitet: sänker pixel ratio och skuggupplösning automatiskt om
   bilduppdateringen sjunker, så det rullar även på mobil
 

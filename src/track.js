@@ -1,8 +1,8 @@
 // Track: a closed city circuit built by extruding cross-sections along a spline.
 import * as THREE from 'three';
 import {
-  makeRoadTexture, makeKerbTexture, makeSidewalkTexture,
-  makeFenceTexture, makeBannerAtlas, BANNERS, mulberry32,
+  makeRoadTexture, makeKerbTexture, makeConcreteKerbTexture, makeSidewalkTexture,
+  makeFenceTexture, makeBannerAtlas, makeManholeTexture, makeSkidTexture, mulberry32,
 } from './textures.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -31,8 +31,10 @@ export function frameAt(curve, length, s) {
   return { p, t, r, u };
 }
 
-// Build a ribbon mesh: profile nodes {x: lateral (+right), y: height, u} swept along the curve.
-function buildRibbon(curve, length, profile, vScale, samples = 720) {
+// Build a ribbon mesh: profile nodes {x: lateral (+right), y: height, u} swept
+// along the curve, optionally only over the arc range [s0, s1].
+function buildRibbon(curve, length, profile, vScale, samples = 720, s0 = 0, s1 = null) {
+  if (s1 === null) s1 = length;
   const rows = samples + 1;
   const n = profile.length;
   const pos = new Float32Array(rows * n * 3);
@@ -40,8 +42,8 @@ function buildRibbon(curve, length, profile, vScale, samples = 720) {
   const idx = [];
 
   for (let i = 0; i < rows; i++) {
-    const s = (i / samples) * length;
-    const { p, r } = frameAt(curve, length, s === length ? 0 : s);
+    const s = s0 + (i / samples) * (s1 - s0);
+    const { p, r } = frameAt(curve, length, s);
     for (let j = 0; j < n; j++) {
       const k = i * n + j;
       pos[k * 3 + 0] = p.x + r.x * profile[j].x;
@@ -122,25 +124,110 @@ export function buildTrack(scene) {
       { x: -ROAD_HALF, y: 0.02, u: 0 },
       { x: ROAD_HALF, y: 0.02, u: 1 },
     ], 1 / 14),
-    new THREE.MeshStandardMaterial({ map: roadTex, roughness: 0.92, metalness: 0.0 })
+    (() => {
+      const m = new THREE.MeshStandardMaterial({
+        map: roadTex.map, normalMap: roadTex.normalMap, roughnessMap: roadTex.roughnessMap,
+        normalScale: new THREE.Vector2(0.5, 0.5), roughness: 1.0, metalness: 0.0,
+      });
+      m.envMapIntensity = 0.22; // keep the blue sky reflection subtle on asphalt
+      m.userData.keepEnv = true;
+      return m;
+    })()
   );
   road.receiveShadow = true;
   scene.add(road);
 
-  // --- kerbs ---------------------------------------------------------------
-  const kerbTex = makeKerbTexture();
-  const kerbMat = new THREE.MeshStandardMaterial({ map: kerbTex, roughness: 0.85 });
+  // --- kerbs: plain concrete on straights, red/white in the corners --------
+  const kerbProfile = (side) => [
+    { x: side * ROAD_HALF, y: 0.02, u: 1 },
+    { x: side * (ROAD_HALF + 0.05), y: 0.14, u: 0.85 },
+    { x: side * (ROAD_HALF + 0.62), y: 0.14, u: 0 },
+  ];
+  const concreteMat = new THREE.MeshStandardMaterial({ map: makeConcreteKerbTexture(), roughness: 0.9 });
   for (const side of [-1, 1]) {
-    const kerb = new THREE.Mesh(
-      buildRibbon(curve, length, [
-        { x: side * ROAD_HALF, y: 0.02, u: 1 },
-        { x: side * (ROAD_HALF + 0.05), y: 0.14, u: 0.85 },
-        { x: side * (ROAD_HALF + 0.62), y: 0.14, u: 0 },
-      ], 1 / 4),
-      kerbMat
-    );
+    const kerb = new THREE.Mesh(buildRibbon(curve, length, kerbProfile(side), 1 / 4), concreteMat);
     kerb.receiveShadow = true;
     scene.add(kerb);
+  }
+
+  // corner spans by curvature (angle change over a lookahead window)
+  const turnAngle = (s) => {
+    const a = frameAt(curve, length, s).t;
+    const b = frameAt(curve, length, s + 14).t;
+    return Math.atan2(a.x * b.z - a.z * b.x, a.x * b.x + a.z * b.z);
+  };
+  const cornerSpans = [];
+  {
+    let start = null;
+    for (let s = 0; s <= length; s += 4) {
+      const bent = Math.abs(turnAngle(s)) > 0.055;
+      if (bent && start === null) start = s;
+      if ((!bent || s + 4 > length) && start !== null) {
+        if (s - start > 16) cornerSpans.push([start - 8, s + 8]);
+        start = null;
+      }
+    }
+  }
+  const racingKerbMat = new THREE.MeshStandardMaterial({ map: makeKerbTexture(), roughness: 0.7 });
+  const racingKerbs = [];
+  for (const [a, b] of cornerSpans) {
+    const n = Math.max(10, Math.floor((b - a) / 2));
+    for (const side of [-1, 1]) {
+      const prof = kerbProfile(side).map((p) => ({ ...p, y: p.y + 0.008 }));
+      racingKerbs.push(buildRibbon(curve, length, prof, 1 / 4, n, a, b));
+    }
+  }
+  if (racingKerbs.length) {
+    const rk = new THREE.Mesh(mergeGeoms(racingKerbs), racingKerbMat);
+    rk.receiveShadow = true;
+    scene.add(rk);
+  }
+
+  // --- skid marks through the corners ---------------------------------------
+  {
+    const skidMat = new THREE.MeshBasicMaterial({
+      map: makeSkidTexture(), transparent: true, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -1,
+    });
+    const skids = [];
+    for (const [a, b] of cornerSpans) {
+      const inside = Math.sign(turnAngle((a + b) / 2)); // roll toward apex
+      for (let k = 0; k < 2; k++) {
+        const off = inside * (1.1 + rng() * 1.4) * (k ? -0.4 : 1);
+        const w = 0.85;
+        const n = Math.max(8, Math.floor((b - a) / 3));
+        skids.push(buildRibbon(curve, length, [
+          { x: off - w / 2, y: 0.035, u: 0 },
+          { x: off + w / 2, y: 0.035, u: 1 },
+        ], 1 / (b - a), n, a - 6 - rng() * 8, b + 4));
+      }
+    }
+    if (skids.length) {
+      // v spans 0..1 per skid because vScale = 1/(span length)
+      const sm = new THREE.Mesh(mergeGeoms(skids), skidMat);
+      sm.renderOrder = 2;
+      scene.add(sm);
+    }
+  }
+
+  // --- manhole covers --------------------------------------------------------
+  {
+    const mhGeos = [];
+    for (let s = 25; s < length; s += 42 + rng() * 30) {
+      const { p, t, r } = frameAt(curve, length, s);
+      const g = new THREE.CircleGeometry(0.45, 20);
+      g.rotateX(-Math.PI / 2);
+      g.rotateY(Math.atan2(t.x, t.z));
+      const lat = (rng() - 0.5) * 6;
+      g.translate(p.x + r.x * lat, p.y + 0.03, p.z + r.z * lat);
+      mhGeos.push(g);
+    }
+    const mh = new THREE.Mesh(mergeGeoms(mhGeos), new THREE.MeshStandardMaterial({
+      map: makeManholeTexture(), transparent: true, roughness: 0.6, metalness: 0.6,
+      polygonOffset: true, polygonOffsetFactor: -1, depthWrite: false,
+    }));
+    mh.renderOrder = 1;
+    scene.add(mh);
   }
 
   // --- sidewalks -----------------------------------------------------------
