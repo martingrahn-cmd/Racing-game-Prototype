@@ -10,9 +10,16 @@ export function createCollision(model, colliders) {
   const roadHalf = model.ROAD_HW;
   const buildings = colliders.buildings;
   const obstacles = colliders.obstacles || []; // knockable street furniture (poles, bollards)
+  const nodes = model.nodes || [0];             // street-grid centrelines
+  const min = model.min ?? -roadHalf, max = model.max ?? roadHalf;
 
+  function nearRoad(v) { // distance to the nearest street centreline
+    let best = Infinity;
+    for (const n of nodes) { const dd = Math.abs(v - n); if (dd < best) best = dd; }
+    return best;
+  }
   function isRoad(x, z) {
-    return Math.abs(x) <= roadHalf || Math.abs(z) <= roadHalf;
+    return nearRoad(x) <= roadHalf || nearRoad(z) <= roadHalf;
   }
 
   // mutates pos and vel; returns feedback flags
@@ -27,10 +34,12 @@ export function createCollision(model, colliders) {
       if (dx * dx + dz * dz < rr * rr) { o.knocked = true; o.knock(); knocked = true; }
     }
 
-    // curb: both axes past the road cross → on a corner sidewalk. It's
-    // mountable (no push-back here) — the driving code adds the jolt/scrub and
+    // curb: inside the district but off every street → up on a block sidewalk.
+    // Mountable (no push-back here) — the driving code adds the jolt/scrub and
     // raises the car onto the curb; buildings below still hard-stop it.
-    if (Math.abs(pos.x) - roadHalf > 0 && Math.abs(pos.z) - roadHalf > 0) onCurb = true;
+    const inDistrict = pos.x > min - roadHalf && pos.x < max + roadHalf
+      && pos.z > min - roadHalf && pos.z < max + roadHalf;
+    if (inDistrict && !isRoad(pos.x, pos.z)) onCurb = true;
 
     // hard buildings: circle vs AABB push-out
     for (const b of buildings) {
