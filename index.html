@@ -119,6 +119,9 @@
   #bugReport #bugCopy { background: #ffd94a; color: #17130a; border-color: #ffd94a; }
   #bugReport .bug-actions button:active { transform: translateY(1px); }
   #bugReport .bug-hint { font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 10px; line-height: 1.4; }
+  #bugReport .bug-log { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 11px; color: rgba(255,255,255,0.6); }
+  #bugReport #bugCount { flex: 1 1 auto; }
+  #bugReport .bug-log button { flex: 0 0 auto; padding: 6px 9px; font-size: 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.06); color: #fff; cursor: pointer; }
 
   #loader {
     position: fixed; inset: 0; z-index: 10;
@@ -164,6 +167,11 @@
       <button id="bugClose">Stäng</button>
     </div>
     <div class="bug-hint">Fotot har laddats ner. Klistra in rapporten i chatten med Claude och dra in bilden — så fixar han buggen.</div>
+    <div class="bug-log" id="bugLogRow" style="display:none">
+      <span id="bugCount"></span>
+      <button id="bugCopyAll">📋 Kopiera alla</button>
+      <button id="bugClear">🗑 Rensa</button>
+    </div>
   </div>
 </div>
 

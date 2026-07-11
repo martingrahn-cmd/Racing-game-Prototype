@@ -205,6 +205,7 @@ function takePhoto(st) {
   };
   elBugMeta.textContent = `${bugCtx.mode} · x ${bugCtx.pos.x.toFixed(1)} z ${bugCtx.pos.z.toFixed(1)} · tod ${tod.toFixed(2)} · ${bugCtx.cam}`;
   elBugText.value = '';
+  refreshBugLog();
   bugOverlay.classList.remove('bug-hidden');
   setTimeout(() => elBugText.focus(), 40);
 }
@@ -216,7 +217,20 @@ function takePhoto(st) {
 const bugOverlay = document.getElementById('bugReport');
 const elBugMeta = document.getElementById('bugMeta');
 const elBugText = document.getElementById('bugText');
+const elBugCount = document.getElementById('bugCount');
+const bugLogRow = document.getElementById('bugLogRow');
 let bugCtx = null;
+
+// session log: collect several reports and copy them all at once, since the
+// clipboard only holds one at a time
+let bugLog = [];
+try { bugLog = JSON.parse(localStorage.getItem('apexBugLog') || '[]'); } catch { bugLog = []; }
+function saveBugLog() { try { localStorage.setItem('apexBugLog', JSON.stringify(bugLog)); } catch { /* private mode */ } }
+function refreshBugLog() {
+  bugLogRow.style.display = bugLog.length ? 'flex' : 'none';
+  elBugCount.textContent = `${bugLog.length} sparade denna session`;
+}
+refreshBugLog();
 
 function buildReport(note) {
   const c = bugCtx;
@@ -244,11 +258,21 @@ async function copyText(text) {
 }
 
 document.getElementById('bugCopy').addEventListener('click', async () => {
-  const ok = await copyText(buildReport(elBugText.value.trim()));
+  const rep = buildReport(elBugText.value.trim());
+  bugLog.push(rep); saveBugLog(); refreshBugLog();
+  const ok = await copyText(rep);
   elPrompt.textContent = ok ? '📋 KOPIERAT — KLISTRA IN I CHATTEN MED CLAUDE' : '⚠️ KUNDE INTE KOPIERA';
   promptTimer = 3.5;
   bugOverlay.classList.add('bug-hidden');
 });
+document.getElementById('bugCopyAll').addEventListener('click', async () => {
+  if (!bugLog.length) return;
+  const ok = await copyText(bugLog.join('\n\n— — — — —\n\n'));
+  elPrompt.textContent = ok ? `📋 ${bugLog.length} BUGGAR KOPIERADE` : '⚠️ KUNDE INTE KOPIERA';
+  promptTimer = 3.5;
+  bugOverlay.classList.add('bug-hidden');
+});
+document.getElementById('bugClear').addEventListener('click', () => { bugLog = []; saveBugLog(); refreshBugLog(); });
 document.getElementById('bugGithub').addEventListener('click', () => {
   const note = elBugText.value.trim();
   const title = encodeURIComponent(`[BUGG] ${note.slice(0, 60) || 'rapport'}`);

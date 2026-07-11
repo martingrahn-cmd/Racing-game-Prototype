@@ -57,20 +57,26 @@ export function createSignals(scene, model) {
     arm.lookAt(pole.position.x + inX, 5.2, pole.position.z + inZ);
     pole.add(arm);
 
-    // head at the arm end
+    // head at the arm end, rotated so its lit face points at the oncoming
+    // driver. Lamps are flat discs (not spheres) so a cross-street light reads
+    // edge-on/dark from here instead of leaking the wrong colour ("åt fel håll").
     const hx = inX * armLen, hz = inZ * armLen;
-    const housing = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.7, 0.5), housingMat);
-    housing.position.set(hx, 4.85, hz);
-    housing.castShadow = true; pole.add(housing);
+    const head = new THREE.Group();
+    head.position.set(hx, 4.85, hz);
+    head.rotation.y = Math.atan2(fx, fz); // local +z now faces the driver
+    pole.add(head);
+    const housing = new THREE.Mesh(new THREE.BoxGeometry(0.62, 1.72, 0.34), housingMat);
+    housing.castShadow = true; head.add(housing);
 
-    // three lamps on the driver-facing side
     const lamps = {};
-    const cols = [['red', RED], ['yellow', YEL], ['green', GRN]];
-    cols.forEach(([name, col], i) => {
-      const mat = new THREE.MeshStandardMaterial({ color: 0x111111, emissive: col, emissiveIntensity: 0.03, roughness: 0.4 });
-      const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.2, 12, 10), mat);
-      lamp.position.set(hx + fx * 0.3, 4.85 + (0.55 - i * 0.55), hz + fz * 0.3);
-      pole.add(lamp);
+    [['red', RED], ['yellow', YEL], ['green', GRN]].forEach(([name, col], i) => {
+      const y = 0.52 - i * 0.52;
+      const mat = new THREE.MeshStandardMaterial({ color: 0x0a0a0a, emissive: col, emissiveIntensity: 0.03, roughness: 0.4, side: THREE.DoubleSide });
+      const disc = new THREE.Mesh(new THREE.CircleGeometry(0.18, 18), mat);
+      disc.position.set(0, y, 0.18); // front face, toward the driver
+      head.add(disc);
+      const hood = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.05, 0.17), housingMat);
+      hood.position.set(0, y + 0.21, 0.23); head.add(hood); // visor over each lamp
       lamps[name] = mat;
     });
     poles.push({ axis: def.axis, lamps });
