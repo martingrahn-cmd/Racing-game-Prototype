@@ -9,7 +9,6 @@
 export function createCollision(model, colliders) {
   const roadHalf = model.ROAD_HW;
   const buildings = colliders.buildings;
-  const CURB_RESIST = 0.86; // fraction of curb penetration kept per frame
 
   function isRoad(x, z) {
     return Math.abs(x) <= roadHalf || Math.abs(z) <= roadHalf;
@@ -19,14 +18,10 @@ export function createCollision(model, colliders) {
   function resolve(pos, radius, vel) {
     let onCurb = false, hitHard = false;
 
-    // soft curb: both axes past the road cross → on a corner sidewalk
-    const ax = Math.abs(pos.x) - roadHalf;
-    const az = Math.abs(pos.z) - roadHalf;
-    if (ax > 0 && az > 0) {
-      onCurb = true;
-      if (ax < az) pos.x = Math.sign(pos.x) * (roadHalf + ax * CURB_RESIST);
-      else pos.z = Math.sign(pos.z) * (roadHalf + az * CURB_RESIST);
-    }
+    // curb: both axes past the road cross → on a corner sidewalk. It's
+    // mountable (no push-back here) — the driving code adds the jolt/scrub and
+    // raises the car onto the curb; buildings below still hard-stop it.
+    if (Math.abs(pos.x) - roadHalf > 0 && Math.abs(pos.z) - roadHalf > 0) onCurb = true;
 
     // hard buildings: circle vs AABB push-out
     for (const b of buildings) {
