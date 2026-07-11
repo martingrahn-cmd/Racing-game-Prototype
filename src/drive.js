@@ -25,11 +25,13 @@ export const TUNE = {
 export function createDrive(curve, length, opts = {}) {
   // ---------------- input ----------------
   const keys = new Set();
+  const typing = (e) => e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA');
   addEventListener('keydown', (e) => {
+    if (typing(e)) return; // let the bug-report field capture typing
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
     keys.add(e.code);
   });
-  addEventListener('keyup', (e) => keys.delete(e.code));
+  addEventListener('keyup', (e) => { if (!typing(e)) keys.delete(e.code); });
 
   let padIndex = null;
   let padToast = 0;

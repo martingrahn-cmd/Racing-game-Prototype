@@ -23,6 +23,12 @@ import GUI from '../vendor/lil-gui.module.min.js';
 // ?world=1 → open-world free-roam slice (Phase 1). Default = the race circuit.
 const WORLD = new URLSearchParams(location.search).has('world');
 
+// true while the user is typing in a form field, so game hotkeys don't fire
+const uiTyping = () => {
+  const a = document.activeElement;
+  return !!a && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT');
+};
+
 // ------------------------------------------------------------ renderer
 const canvas = document.getElementById('game');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
@@ -121,6 +127,7 @@ const gui = new GUI({ title: 'APEX DEBUG' });
 }
 let guiVisible = false;
 addEventListener('keydown', (e) => {
+  if (uiTyping()) return;
   if (e.code === 'KeyG') {
     guiVisible = !guiVisible;
     guiVisible ? gui.show() : gui.hide();
@@ -155,13 +162,13 @@ async function hardReload() {
   }
 }
 document.getElementById('btnReload').addEventListener('click', hardReload);
-addEventListener('keydown', (e) => { if (e.code === 'KeyU') hardReload(); });
+addEventListener('keydown', (e) => { if (!uiTyping() && e.code === 'KeyU') hardReload(); });
 
 // ---------------------------------------------------------- photo mode
 // Captures the frame with a burned-in coordinate stamp (and coords in the
 // filename) so a screenshot doubles as a bug report we can teleport back to.
 let photoRequested = false;
-addEventListener('keydown', (e) => { if (e.code === 'KeyP') photoRequested = true; });
+addEventListener('keydown', (e) => { if (!uiTyping() && e.code === 'KeyP') photoRequested = true; });
 document.getElementById('btnPhoto').addEventListener('click', () => { photoRequested = true; });
 
 function takePhoto(st) {
@@ -191,26 +198,70 @@ function takePhoto(st) {
   elPrompt.textContent = `📸 ${name}`;
   promptTimer = 2.5;
 
-  // bug-report bridge: an optional comment opens a prefilled GitHub issue
-  // (coords + teleport link) that Claude reads and fixes from
-  const note = window.prompt('Buggrapport? Skriv en kommentar (Avbryt = bara spara fotot):');
-  if (note !== null && note.trim() !== '') {
-    const title = encodeURIComponent(`[BUGG] ${note.trim().slice(0, 60)}`);
-    const body = encodeURIComponent(
-      `**Position:** x ${pos.x.toFixed(1)} · z ${pos.z.toFixed(1)} · s ${Math.round(sPos)} m\n` +
-      `**Tid på dygnet:** ${tod.toFixed(3)} · **Kamera:** ${CAM_NAMES[camMode]}\n` +
-      `**Teleport:** \`?s=${Math.round(sPos)}&tod=${tod.toFixed(2)}\`\n\n` +
-      `**Rapport:** ${note.trim()}\n\n` +
-      `_Dra gärna in fotot (${name}) här nedanför innan du skickar._`
-    );
-    window.open(`https://github.com/martingrahn-cmd/Racing-game-Prototype/issues/new?title=${title}&body=${body}&labels=bugg`, '_blank');
-  }
+  // open the bug-report overlay, pre-loaded with this frame's context
+  bugCtx = {
+    pos: pos.clone(), tod, cam: CAM_NAMES[camMode], s: Math.round(sPos),
+    kmh: st ? Math.round(st.kmh) : 0, mode: WORLD ? 'world' : 'race', file: name,
+  };
+  elBugMeta.textContent = `${bugCtx.mode} · x ${bugCtx.pos.x.toFixed(1)} z ${bugCtx.pos.z.toFixed(1)} · tod ${tod.toFixed(2)} · ${bugCtx.cam}`;
+  elBugText.value = '';
+  bugOverlay.classList.remove('bug-hidden');
+  setTimeout(() => elBugText.focus(), 40);
 }
+
+// ------------------------------------------------------------ bug report
+// A photo doubles as a bug report: the overlay copies a structured, teleport-
+// stamped report to the clipboard (paste it + the photo straight into the
+// Claude chat), or opens a prefilled GitHub issue as a fallback.
+const bugOverlay = document.getElementById('bugReport');
+const elBugMeta = document.getElementById('bugMeta');
+const elBugText = document.getElementById('bugText');
+let bugCtx = null;
+
+function buildReport(note) {
+  const c = bugCtx;
+  if (!c) return '';
+  const teleport = c.mode === 'world' ? '?world=1' : `?s=${c.s}&tod=${c.tod.toFixed(2)}`;
+  return [
+    `[BUGG]${note ? ' ' + note.split('\n')[0].slice(0, 60) : ''}`,
+    '',
+    `Läge: ${c.mode} · x ${c.pos.x.toFixed(1)} · z ${c.pos.z.toFixed(1)} · tod ${c.tod.toFixed(3)} · kamera ${c.cam} · fart ${c.kmh} km/h`,
+    `Teleport: ${teleport}`,
+    note ? `\nRapport: ${note}` : '',
+    `\n(Bild: ${c.file} — dra in den här i chatten)`,
+  ].join('\n');
+}
+
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch { /* fall back */ }
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.focus(); ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { /* ignore */ }
+  ta.remove();
+  return ok;
+}
+
+document.getElementById('bugCopy').addEventListener('click', async () => {
+  const ok = await copyText(buildReport(elBugText.value.trim()));
+  elPrompt.textContent = ok ? '📋 KOPIERAT — KLISTRA IN I CHATTEN MED CLAUDE' : '⚠️ KUNDE INTE KOPIERA';
+  promptTimer = 3.5;
+  bugOverlay.classList.add('bug-hidden');
+});
+document.getElementById('bugGithub').addEventListener('click', () => {
+  const note = elBugText.value.trim();
+  const title = encodeURIComponent(`[BUGG] ${note.slice(0, 60) || 'rapport'}`);
+  const body = encodeURIComponent(buildReport(note));
+  window.open(`https://github.com/martingrahn-cmd/Racing-game-Prototype/issues/new?title=${title}&body=${body}&labels=bugg`, '_blank');
+  bugOverlay.classList.add('bug-hidden');
+});
+document.getElementById('bugClose').addEventListener('click', () => bugOverlay.classList.add('bug-hidden'));
 // browsers unlock audio on a user gesture; any of these will do
 for (const ev of ['keydown', 'pointerdown', 'gamepadconnected']) {
   addEventListener(ev, () => audio.resume());
 }
-addEventListener('keydown', (e) => { if (e.code === 'KeyM') audio.toggleMute(); });
+addEventListener('keydown', (e) => { if (!uiTyping() && e.code === 'KeyM') audio.toggleMute(); });
 
 // image-based lighting from the generated sky (gives glass its sheen)
 {
@@ -376,6 +427,7 @@ function changeSpeed(d) {
   speedIdx = THREE.MathUtils.clamp(speedIdx + d, 0, SPEEDS.length - 1);
 }
 addEventListener('keydown', (e) => {
+  if (uiTyping()) return;
   if (e.code === 'KeyC') { e.preventDefault(); cycleCamera(); }
   if (!drive.playing && (e.code === 'Equal')) changeSpeed(1);
   if (!drive.playing && (e.code === 'Minus')) changeSpeed(-1);
