@@ -19,6 +19,7 @@ export const TUNE = {
   driftGrip: 1.8,   // more bite in the slide = a heavier, less floaty drift
   steer: 2.4,
   driftSteer: 1.6,
+  sidewalkMax: 8.3, // m/s ≈ 30 km/h — sidewalks are a slow crawl, never a route
 };
 
 export function createDrive(curve, length, opts = {}) {
@@ -208,8 +209,10 @@ export function createDrive(curve, length, opts = {}) {
         // the sidewalk with a jolt, drive it slower, and hop back down
         const fb = world.collision.resolve(pos, 1.5, vel);
         if (fb.onCurb) {
-          if (!onCurbPrev && speed > 4) { vel.multiplyScalar(0.8); rumble(0.6, 0.5, 120); } // mount jolt
-          vel.multiplyScalar(Math.max(0, 1 - 0.9 * dt)); // sidewalks are slower going
+          if (!onCurbPrev && speed > 4) { vel.multiplyScalar(0.7); rumble(0.7, 0.5, 130); } // mount jolt
+          vel.multiplyScalar(Math.max(0, 1 - 2.4 * dt));   // bog down onto the kerb
+          const sp = vel.length();                          // hard cap: never a fast route
+          if (sp > TUNE.sidewalkMax) vel.multiplyScalar(TUNE.sidewalkMax / sp);
         }
         onCurbPrev = fb.onCurb;
         const targetY = fb.onCurb ? (world.curbY || 0) : 0;

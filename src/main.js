@@ -116,6 +116,7 @@ const gui = new GUI({ title: 'APEX DEBUG' });
   fDrive.add(TUNE, 'grip', 2, 12, 0.1).name('grepp');
   fDrive.add(TUNE, 'driftGrip', 0.4, 4, 0.1).name('sladdgrepp');
   fDrive.add(TUNE, 'steer', 1, 4, 0.05).name('styrutslag');
+  fDrive.add(TUNE, 'sidewalkMax', 3, 20, 0.5).name('trottoar max m/s');
   gui.hide();
 }
 let guiVisible = false;
