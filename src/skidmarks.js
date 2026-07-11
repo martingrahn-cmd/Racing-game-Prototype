@@ -107,6 +107,15 @@ export function createSkidmarks(scene) {
       }
 
       if (marking) {
+        // mark darkness scales with how hard the tires are sliding. A handbrake
+        // drift runs ~13-17 m/s of lateral slip and lays rich black rubber; a
+        // grippy full-lock corner only breaks traction to ~6 m/s and leaves a
+        // faint scuff that the fade erases in a few seconds. The handbrake flag
+        // is the real separator — at speed the no-handbrake slip saturates
+        // around 6 regardless of throttle, so we key darkness on it directly.
+        const alpha = st.hand
+          ? Math.min(0.75, Math.max(0.65, 0.65 + 0.010 * (st.slip - 3)))
+          : Math.min(0.55, Math.max(0.08, 0.08 + 0.030 * (st.slip - 4)));
         right.set(-st.heading.z, 0, st.heading.x);
         for (const side of [0, 1]) {
           c.copy(st.pos)
@@ -136,7 +145,7 @@ export function createSkidmarks(scene) {
             prev.l.copy(prev.c).add(perp);
             prev.r.copy(prev.c).sub(perp);
           }
-          emit(prev, cur);
+          emit(prev, cur, alpha);
           last[side] = cur;
         }
       } else {
