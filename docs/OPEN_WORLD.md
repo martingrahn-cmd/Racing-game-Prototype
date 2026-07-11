@@ -2,6 +2,12 @@
 
 Levande dokument. Nordstjärna för bygget av den fria staden. Uppdateras allt eftersom.
 
+> **Status:** Fas 1 (vertikal skiva) **byggd** — kör på `?world=1`. En 4-vägskorsning
+> med fri körning, hus-/kantsten-krock, cyklande trafikljus, trottoarer, körfältslinjer,
+> övergångsställen och distansfyllnad. Nästa: Fas 2 (tila ut rutnätet + centralt torg).
+> Moduler: `citymodel.js` (data), `world.js` (geometri), `signals.js` (ljus),
+> `collision.js` (krock); fri körning ligger bakom en `world`-flagga i `drive.js`.
+
 > Kort: bilen är idag fastlimmad vid en spline (banan). Öppen värld = ta bort den
 > klämman och ersätta med **gatunät + krockhantering**. Allt annat (trafikljus,
 > papperskorgar, fontäner, gungor) är innehåll ovanpå det fundamentet.

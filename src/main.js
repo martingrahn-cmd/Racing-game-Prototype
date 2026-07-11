@@ -14,7 +14,14 @@ import { createSmoke } from './smoke.js';
 import { createSkidmarks } from './skidmarks.js';
 import { createDayNight } from './daynight.js';
 import { createMinimap } from './minimap.js';
+import { createSliceModel } from './citymodel.js';
+import { buildWorld } from './world.js';
+import { createSignals } from './signals.js';
+import { createCollision } from './collision.js';
 import GUI from '../vendor/lil-gui.module.min.js';
+
+// ?world=1 → open-world free-roam slice (Phase 1). Default = the race circuit.
+const WORLD = new URLSearchParams(location.search).has('world');
 
 // ------------------------------------------------------------ renderer
 const canvas = document.getElementById('game');
@@ -66,18 +73,31 @@ scene.add(hemi);
 
 // ------------------------------------------------------------ world
 const sky = buildSky(scene);
-const { curve, length, cornerSpans } = buildTrack(scene);
-buildCity(scene, curve, length);
 // hero car first: its download + Draco decode should win the network queue
 const car = createCar(scene);
-const extras = buildExtras(scene, renderer, curve, length, cornerSpans);
-const traffic = buildTraffic(scene, curve, length);
-const drive = createDrive(curve, length);
 const audio = createAudio();
 const smoke = createSmoke(scene);
 const skidmarks = createSkidmarks(scene);
+
+let curve = null, length = 0, cornerSpans = null;
+let extras = null, traffic = null, minimap = null, signals = null, drive;
+if (WORLD) {
+  const model = createSliceModel();
+  const worldObj = buildWorld(scene, model);
+  signals = createSignals(scene, model);
+  const collision = createCollision(model, worldObj.colliders);
+  drive = createDrive(null, 0, { world: { spawn: model.spawn, collision } });
+  scene.fog.near = 72; scene.fog.far = 240; // pull the horizon in for the slice
+  const mm = document.getElementById('minimap'); if (mm) mm.style.display = 'none';
+} else {
+  ({ curve, length, cornerSpans } = buildTrack(scene));
+  buildCity(scene, curve, length);
+  extras = buildExtras(scene, renderer, curve, length, cornerSpans);
+  traffic = buildTraffic(scene, curve, length);
+  drive = createDrive(curve, length);
+  minimap = createMinimap(curve, length);
+}
 const daynight = createDayNight({ scene, sky, sun, hemi, post });
-const minimap = createMinimap(curve, length);
 
 // debug panel (G) — the vibe-coder's control room
 const gui = new GUI({ title: 'APEX DEBUG' });
@@ -116,6 +136,7 @@ const GAME_FILES = [
   'src/post.js', 'src/car.js', 'src/traffic.js', 'src/extras.js', 'src/drive.js',
   'src/audio.js', 'src/smoke.js', 'src/skidmarks.js', 'src/daynight.js',
   'src/night.js', 'src/minimap.js',
+  'src/citymodel.js', 'src/world.js', 'src/signals.js', 'src/collision.js',
   'vendor/three.module.js', 'vendor/lil-gui.module.min.js',
   'vendor/loaders/GLTFLoader.js', 'vendor/loaders/DRACOLoader.js',
   'vendor/utils/BufferGeometryUtils.js', 'vendor/utils/SkeletonUtils.js',
@@ -212,6 +233,7 @@ const params = new URLSearchParams(location.search);
 let speedIdx = THREE.MathUtils.clamp(parseInt(params.get('speed') ?? '2', 10), 0, SPEEDS.length - 1);
 let sPos = parseFloat(params.get('s') ?? '0');
 let camMode = THREE.MathUtils.clamp(parseInt(params.get('cam') ?? '0', 10), 0, 4); // 4 = photo orbit (URL only)
+if (WORLD && camMode > 2) camMode = 0; // trackside cam needs the spline
 let lastUserSwitch = params.has('cam') ? Infinity : -30; // explicit ?cam= pins the camera
 let autoTimer = 0;
 let tracksideS = null;
@@ -344,7 +366,7 @@ function updateCamera(dt, time, st) {
 
 // ------------------------------------------------------------ input
 function cycleCamera() {
-  camMode = (camMode + 1) % 4;
+  camMode = (camMode + 1) % (WORLD ? 3 : 4); // no trackside cam in free roam
   tracksideS = null;
   lastUserSwitch = perfTime;
   smoothedPos = null;
@@ -438,7 +460,7 @@ function loop(now) {
   last = now;
   perfTime += dt;
 
-  const st = drive.update(dt, sPos, traffic.cars);
+  const st = drive.update(dt, sPos, WORLD ? null : traffic.cars);
   if (st) audio.resume(); // gamepad-only players never fire DOM gestures
   if (drive.consumeCameraTap()) cycleCamera();
 
@@ -452,12 +474,16 @@ function loop(now) {
   }
   daynight.update(dt);
   const kmh = updateCamera(dt, perfTime, st);
-  extras.update(dt);
-  traffic.update(dt);
+  if (WORLD) {
+    signals.update(dt);
+  } else {
+    extras.update(dt);
+    traffic.update(dt);
+  }
   smoke.update(dt, st);
   skidmarks.update(dt, st);
   audio.update(st, dt);
-  minimap.update(st ? st.pos : carGround, st ? st.yaw : Math.atan2(dirVec.x, dirVec.z), traffic.cars);
+  if (!WORLD) minimap.update(st ? st.pos : carGround, st ? st.yaw : Math.atan2(dirVec.x, dirVec.z), traffic.cars);
   autoQuality(dt);
   if (postEnabled) {
     const sf = (kmh - 90) / 210;
