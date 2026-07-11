@@ -91,6 +91,35 @@
   }
   @media (max-width: 700px) { #minimap { width: 110px; height: 110px; } }
 
+  #bugReport {
+    position: fixed; inset: 0; z-index: 20; display: flex;
+    align-items: center; justify-content: center;
+    background: rgba(6,8,12,0.72); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+  }
+  #bugReport.bug-hidden { display: none; }
+  #bugReport .bug-card {
+    width: min(92vw, 440px); background: #12161c;
+    border: 1px solid rgba(255,255,255,0.14); border-radius: 14px;
+    padding: 18px; color: #fff; box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }
+  #bugReport .bug-title { font-weight: 900; font-style: italic; letter-spacing: 0.08em; font-size: 18px; margin-bottom: 8px; }
+  #bugReport .bug-meta { font-family: ui-monospace, monospace; font-size: 11px; color: #ffd94a; margin-bottom: 10px; word-break: break-all; }
+  #bugReport textarea {
+    width: 100%; height: 92px; resize: none; border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.18); background: #0b0e12; color: #fff;
+    padding: 10px; font-size: 15px; font-family: inherit; outline: none;
+  }
+  #bugReport textarea:focus { border-color: #ffd94a; }
+  #bugReport .bug-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  #bugReport .bug-actions button {
+    flex: 1 1 auto; padding: 11px 10px; border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.06);
+    color: #fff; font-weight: 700; font-size: 14px; cursor: pointer;
+  }
+  #bugReport #bugCopy { background: #ffd94a; color: #17130a; border-color: #ffd94a; }
+  #bugReport .bug-actions button:active { transform: translateY(1px); }
+  #bugReport .bug-hint { font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 10px; line-height: 1.4; }
+
   #loader {
     position: fixed; inset: 0; z-index: 10;
     background: #0b0d10; display: flex; align-items: center; justify-content: center;
@@ -122,6 +151,20 @@
   <button id="btnReload" title="Hämta senaste versionen (förbi cachen)">🔄</button>
   <button id="btnPlus" title="Öka fart">+</button>
   <button id="btnMinus" title="Sänk fart">−</button>
+</div>
+
+<div id="bugReport" class="bug-hidden">
+  <div class="bug-card">
+    <div class="bug-title">🐞 BUGGRAPPORT</div>
+    <div class="bug-meta" id="bugMeta"></div>
+    <textarea id="bugText" placeholder="Vad är fel? Beskriv kort…"></textarea>
+    <div class="bug-actions">
+      <button id="bugCopy">📋 Kopiera rapport</button>
+      <button id="bugGithub">🐙 GitHub</button>
+      <button id="bugClose">Stäng</button>
+    </div>
+    <div class="bug-hint">Fotot har laddats ner. Klistra in rapporten i chatten med Claude och dra in bilden — så fixar han buggen.</div>
+  </div>
 </div>
 
 <div id="loader">GENERERAR <span>&nbsp;STAD…</span></div>
