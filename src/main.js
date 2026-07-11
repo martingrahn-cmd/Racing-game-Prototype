@@ -106,6 +106,35 @@ addEventListener('keydown', (e) => {
   }
 });
 
+// ---------------------------------------------------------- hard reload
+// Forces fresh copies of every game file past the HTTP cache (fetch with
+// cache:'reload' overwrites the cache entry), then reloads. One click after
+// a deploy = guaranteed latest version, no manual cache clearing.
+const GAME_FILES = [
+  'index.html',
+  'src/main.js', 'src/track.js', 'src/city.js', 'src/sky.js', 'src/textures.js',
+  'src/post.js', 'src/car.js', 'src/traffic.js', 'src/extras.js', 'src/drive.js',
+  'src/audio.js', 'src/smoke.js', 'src/skidmarks.js', 'src/daynight.js',
+  'src/night.js', 'src/minimap.js',
+  'vendor/three.module.js', 'vendor/lil-gui.module.min.js',
+  'vendor/loaders/GLTFLoader.js', 'vendor/loaders/DRACOLoader.js',
+  'vendor/utils/BufferGeometryUtils.js', 'vendor/utils/SkeletonUtils.js',
+];
+let reloading = false;
+async function hardReload() {
+  if (reloading) return;
+  reloading = true;
+  elPrompt.textContent = '🔄 HÄMTAR SENASTE VERSIONEN…';
+  promptTimer = 60;
+  try {
+    await Promise.allSettled(GAME_FILES.map((f) => fetch(f, { cache: 'reload' })));
+  } finally {
+    location.reload();
+  }
+}
+document.getElementById('btnReload').addEventListener('click', hardReload);
+addEventListener('keydown', (e) => { if (e.code === 'KeyU') hardReload(); });
+
 // ---------------------------------------------------------- photo mode
 // Captures the frame with a burned-in coordinate stamp (and coords in the
 // filename) so a screenshot doubles as a bug report we can teleport back to.
