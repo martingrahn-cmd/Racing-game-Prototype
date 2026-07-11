@@ -139,6 +139,21 @@ function takePhoto(st) {
   });
   elPrompt.textContent = `📸 ${name}`;
   promptTimer = 2.5;
+
+  // bug-report bridge: an optional comment opens a prefilled GitHub issue
+  // (coords + teleport link) that Claude reads and fixes from
+  const note = window.prompt('Buggrapport? Skriv en kommentar (Avbryt = bara spara fotot):');
+  if (note !== null && note.trim() !== '') {
+    const title = encodeURIComponent(`[BUGG] ${note.trim().slice(0, 60)}`);
+    const body = encodeURIComponent(
+      `**Position:** x ${pos.x.toFixed(1)} · z ${pos.z.toFixed(1)} · s ${Math.round(sPos)} m\n` +
+      `**Tid på dygnet:** ${tod.toFixed(3)} · **Kamera:** ${CAM_NAMES[camMode]}\n` +
+      `**Teleport:** \`?s=${Math.round(sPos)}&tod=${tod.toFixed(2)}\`\n\n` +
+      `**Rapport:** ${note.trim()}\n\n` +
+      `_Dra gärna in fotot (${name}) här nedanför innan du skickar._`
+    );
+    window.open(`https://github.com/martingrahn-cmd/Racing-game-Prototype/issues/new?title=${title}&body=${body}&labels=bugg`, '_blank');
+  }
 }
 // browsers unlock audio on a user gesture; any of these will do
 for (const ev of ['keydown', 'pointerdown', 'gamepadconnected']) {
