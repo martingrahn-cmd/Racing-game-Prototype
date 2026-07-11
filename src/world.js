@@ -118,7 +118,8 @@ export function buildWorld(scene, model) {
   const roofMat = new THREE.MeshStandardMaterial({ map: roofTex, roughness: 0.9, metalness: 0 });
   const awnings = [0x8a3f39, 0x3d5c48, 0x41546e, 0x7a6a4a];
   const tints = [0xffffff, 0xf1ece2, 0xe6eef5, 0xfff2e6];
-  const doorMat = new THREE.MeshStandardMaterial({ color: 0x14181c, roughness: 0.25, metalness: 0.4 });
+  const doorGlass = new THREE.MeshStandardMaterial({ color: 0x161d24, roughness: 0.12, metalness: 0.65 });
+  const frameMat = new THREE.MeshStandardMaterial({ color: 0x3b4048, roughness: 0.7, metalness: 0.25 });
   const mastMat = new THREE.MeshStandardMaterial({ color: 0x33373d, roughness: 0.6, metalness: 0.7 });
   model.buildings.forEach((b, i) => {
     const w = b.maxX - b.minX, d = b.maxZ - b.minZ, h = b.height;
@@ -150,23 +151,47 @@ export function buildWorld(scene, model) {
       beacon.position.set(cx, CURB_Y + h + 3.2 + 12, cz); group.add(beacon);
     }
 
-    // street entrance on the face toward the intersection
+    // recessed street entrance on the face toward the intersection. The frame
+    // and reveals PROTRUDE while the glass sits flush, so the doorway reads as
+    // an inset portal with depth instead of a decal stuck on the wall.
     const [sx] = b.quad;
-    const innerX = sx > 0 ? b.minX : b.maxX;
-    const nx = -sx; // face normal pointing toward the intersection
-    const canopy = new THREE.Mesh(
-      new THREE.BoxGeometry(2.8, 0.35, 7),
-      new THREE.MeshStandardMaterial({ color: awnings[i % awnings.length], roughness: 0.85 }),
-    );
-    canopy.position.set(innerX + nx * 1.3, 3.8, cz);
+    const faceX = sx > 0 ? b.minX : b.maxX; // facade nearest the intersection
+    const nx = -sx;                          // outward normal toward the road
+    const yaw = nx > 0 ? Math.PI / 2 : -Math.PI / 2;
+    const DW = 5, DH = 3.6, REV = 0.75;      // opening width (z), height, reveal depth
+    // warm lobby glow, lit at night, sitting just inside the glass
+    const lobbyMat = new THREE.MeshStandardMaterial({ color: 0x120d06, emissive: 0xffdca0, emissiveIntensity: 0 });
+    registerEmissive(lobbyMat, 0, 0.85);
+    const lobby = new THREE.Mesh(new THREE.PlaneGeometry(DW - 0.4, DH - 0.4), lobbyMat);
+    lobby.position.set(faceX + nx * 0.02, CURB_Y + DH / 2, cz); lobby.rotation.y = yaw; group.add(lobby);
+    // dark reflective glass doors, flush on the facade
+    const glass = new THREE.Mesh(new THREE.PlaneGeometry(DW, DH), doorGlass);
+    glass.position.set(faceX + nx * 0.05, CURB_Y + DH / 2, cz); glass.rotation.y = yaw; group.add(glass);
+    // mullion between the two door leaves
+    const mull = new THREE.Mesh(new THREE.BoxGeometry(0.12, DH, 0.1), frameMat);
+    mull.position.set(faceX + nx * 0.08, CURB_Y + DH / 2, cz); group.add(mull);
+    // protruding jambs + lintel that frame (and recess) the glass
+    for (const s of [-1, 1]) {
+      const jamb = new THREE.Mesh(new THREE.BoxGeometry(REV, DH + 0.5, 0.45), frameMat);
+      jamb.position.set(faceX + nx * REV / 2, CURB_Y + (DH + 0.5) / 2, cz + s * (DW / 2 + 0.22));
+      jamb.castShadow = true; group.add(jamb);
+    }
+    const lintel = new THREE.Mesh(new THREE.BoxGeometry(REV, 0.55, DW + 0.9), frameMat);
+    lintel.position.set(faceX + nx * REV / 2, CURB_Y + DH + 0.27, cz);
+    lintel.castShadow = true; group.add(lintel);
+    // awning above, on two slim posts
+    const canopy = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.3, DW + 1.6),
+      new THREE.MeshStandardMaterial({ color: awnings[i % awnings.length], roughness: 0.85 }));
+    canopy.position.set(faceX + nx * 1.55, CURB_Y + DH + 0.78, cz);
     canopy.castShadow = true; group.add(canopy);
-    const door = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 3.5), doorMat);
-    door.position.set(innerX + nx * 0.06, CURB_Y + 1.85, cz);
-    door.rotation.y = nx > 0 ? Math.PI / 2 : -Math.PI / 2;
-    group.add(door);
-    const steps = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.14, 6), curbSide);
-    steps.position.set(innerX + nx * 0.95, CURB_Y + 0.07, cz);
-    group.add(steps);
+    for (const s of [-1, 1]) {
+      const h2 = CURB_Y + DH + 0.78;
+      const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, h2, 6), frameMat);
+      strut.position.set(faceX + nx * 2.7, h2 / 2, cz + s * (DW / 2 + 0.55)); group.add(strut);
+    }
+    // low threshold sill
+    const sill = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.12, DW + 0.4), frameMat);
+    sill.position.set(faceX + nx * 0.28, CURB_Y + 0.06, cz); group.add(sill);
   });
 
   // -------------------------------------------------- distant filler
