@@ -225,6 +225,7 @@ export function createDrive(curve, length) {
         roll: THREE.MathUtils.clamp(-lat * 0.012, -0.09, 0.09),
         lookBack: inp.look,
         drifting,
+        hand: inp.hand,               // handbrake held → rear wheels locked (skidmarks)
         slip: Math.abs(lat),          // lateral tire slip, feeds screech + smoke
         throttle: inp.throttle,
         brake: inp.brake,
