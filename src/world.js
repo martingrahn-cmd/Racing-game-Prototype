@@ -121,6 +121,12 @@ export function buildWorld(scene, model) {
   const doorGlass = new THREE.MeshStandardMaterial({ color: 0x161d24, roughness: 0.12, metalness: 0.65 });
   const frameMat = new THREE.MeshStandardMaterial({ color: 0x3b4048, roughness: 0.7, metalness: 0.25 });
   const mastMat = new THREE.MeshStandardMaterial({ color: 0x33373d, roughness: 0.6, metalness: 0.7 });
+  const trimMat = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, roughness: 0.4, metalness: 0.65 });
+  const bollardMat = new THREE.MeshStandardMaterial({ color: 0x1c1f24, roughness: 0.6, metalness: 0.5 });
+  const sconceMat = new THREE.MeshStandardMaterial({ color: 0x2a2418, emissive: 0xffdca0, emissiveIntensity: 0.08, roughness: 0.5 });
+  registerEmissive(sconceMat, 0.08, 2.0);       // entrance lamps, glow at night
+  const signMat = new THREE.MeshStandardMaterial({ color: 0x151b22, emissive: 0xbfe0ff, emissiveIntensity: 0.15, roughness: 0.4 });
+  registerEmissive(signMat, 0.15, 1.7);         // lit signage band
   model.buildings.forEach((b, i) => {
     const w = b.maxX - b.minX, d = b.maxZ - b.minZ, h = b.height;
     const cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2;
@@ -192,6 +198,21 @@ export function buildWorld(scene, model) {
     // low threshold sill
     const sill = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.12, DW + 0.4), frameMat);
     sill.position.set(faceX + nx * 0.28, CURB_Y + 0.06, cz); group.add(sill);
+    // finer detail: wall sconces, door handles, bollards
+    for (const s of [-1, 1]) {
+      const sconce = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.5, 0.14), sconceMat);
+      sconce.position.set(faceX + nx * 0.16, CURB_Y + 2.7, cz + s * (DW / 2 + 0.42));
+      group.add(sconce);
+      const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.95, 6), trimMat);
+      handle.position.set(faceX + nx * 0.13, CURB_Y + 1.2, cz + s * 0.4);
+      group.add(handle);
+      const bollard = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.9, 10), bollardMat);
+      bollard.position.set(faceX + nx * 2.4, CURB_Y + 0.45, cz + s * (DW / 2 + 0.9));
+      bollard.castShadow = true; group.add(bollard);
+    }
+    // illuminated signage band above the doors
+    const sign = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.5, DW - 0.6), signMat);
+    sign.position.set(faceX + nx * 0.13, CURB_Y + DH - 0.12, cz); group.add(sign);
   });
 
   // -------------------------------------------------- distant filler

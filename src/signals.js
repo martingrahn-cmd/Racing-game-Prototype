@@ -27,11 +27,15 @@ export function createSignals(scene, model) {
   const state = { ns: 'green', ew: 'red' };
 
   // one pole per approach, on the driver's-right far corner, head facing traffic
+  // near-side signals: one pole per approach on the driver's-right corner
+  // BEFORE the intersection, arm straight out over that lane, head facing back
+  // at the driver (Euro-style — "närmaste stolpen, vänd mot körfältet")
+  const C = R + 1.4;
   const poleDefs = [
-    { corner: [-(R + 1.6), R + 1.6], face: [0, -1], axis: 'ns' }, // northbound
-    { corner: [R + 1.6, -(R + 1.6)], face: [0, 1], axis: 'ns' },  // southbound
-    { corner: [R + 1.6, R + 1.6], face: [-1, 0], axis: 'ew' },    // eastbound
-    { corner: [-(R + 1.6), -(R + 1.6)], face: [1, 0], axis: 'ew' }, // westbound
+    { corner: [-C, -C], arm: [1, 0], face: [0, -1], axis: 'ns' }, // northbound (SW corner)
+    { corner: [C, C], arm: [-1, 0], face: [0, 1], axis: 'ns' },   // southbound (NE corner)
+    { corner: [-C, C], arm: [0, -1], face: [-1, 0], axis: 'ew' }, // eastbound (NW corner)
+    { corner: [C, -C], arm: [0, 1], face: [1, 0], axis: 'ew' },   // westbound (SE corner)
   ];
 
   const poleMat = new THREE.MeshStandardMaterial({ color: 0x23262b, roughness: 0.7, metalness: 0.5 });
@@ -40,31 +44,34 @@ export function createSignals(scene, model) {
 
   for (const def of poleDefs) {
     const [cx, cz] = def.corner;
+    const [ax, az] = def.arm;
     const [fx, fz] = def.face;
     const pole = new THREE.Group();
     pole.position.set(cx, 0, cz);
     group.add(pole);
 
-    // vertical post
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 5.4, 8), poleMat);
-    post.position.y = 2.7; post.castShadow = true; pole.add(post);
+    const POST_H = 5.8, ARM_Y = 5.3, ARM_LEN = 5.6;
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.16, POST_H, 8), poleMat);
+    post.position.y = POST_H / 2; post.castShadow = true; pole.add(post);
 
-    // arm reaching in over the lane (toward the intersection = -corner dir)
-    const inX = -Math.sign(cx), inZ = -Math.sign(cz);
-    const armLen = 3.6;
-    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, armLen), poleMat);
-    arm.position.set(inX * armLen / 2, 5.2, inZ * armLen / 2);
-    arm.lookAt(pole.position.x + inX, 5.2, pole.position.z + inZ);
-    pole.add(arm);
+    // horizontal arm, attached at the pole and reaching straight out over the
+    // lane (fixes the floating boom — it now starts at the post)
+    const arm = new THREE.Mesh(
+      ax !== 0 ? new THREE.BoxGeometry(ARM_LEN, 0.13, 0.13) : new THREE.BoxGeometry(0.13, 0.13, ARM_LEN),
+      poleMat,
+    );
+    arm.position.set(ax * ARM_LEN / 2, ARM_Y, az * ARM_LEN / 2);
+    arm.castShadow = true; pole.add(arm);
 
-    // head at the arm end, rotated so its lit face points at the oncoming
-    // driver. Lamps are flat discs (not spheres) so a cross-street light reads
-    // edge-on/dark from here instead of leaking the wrong colour ("åt fel håll").
-    const hx = inX * armLen, hz = inZ * armLen;
+    // head hanging from the arm end, facing the oncoming driver. Lamps are flat
+    // discs so cross-street lights read edge-on, not the wrong colour.
+    const hx = ax * ARM_LEN, hz = az * ARM_LEN;
     const head = new THREE.Group();
-    head.position.set(hx, 4.85, hz);
-    head.rotation.y = Math.atan2(fx, fz); // local +z now faces the driver
+    head.position.set(hx, ARM_Y - 0.95, hz);
+    head.rotation.y = Math.atan2(fx, fz);
     pole.add(head);
+    const hang = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.95, 0.08), poleMat);
+    hang.position.set(0, 0.95, 0); head.add(hang); // connects the head up to the arm
     const housing = new THREE.Mesh(new THREE.BoxGeometry(0.62, 1.72, 0.34), housingMat);
     housing.castShadow = true; head.add(housing);
 
