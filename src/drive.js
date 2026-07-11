@@ -21,7 +21,7 @@ export const TUNE = {
   driftSteer: 1.6,
 };
 
-export function createDrive(curve, length) {
+export function createDrive(curve, length, opts = {}) {
   // ---------------- input ----------------
   const keys = new Set();
   addEventListener('keydown', (e) => {
@@ -93,6 +93,17 @@ export function createDrive(curve, length) {
   let playing = false;
   let wallBuzz = 0;
 
+  // free-roam (open world) mode: no spline, drive anywhere and collide with the
+  // static world. Controllable from the first frame (no attract takeover).
+  const world = opts.world || null;
+  if (world) {
+    playing = true;
+    pos.set(world.spawn.pos[0], 0, world.spawn.pos[2]);
+    yaw = world.spawn.yaw;
+    heading.set(Math.sin(yaw), 0, Math.cos(yaw));
+    vel.copy(heading).multiplyScalar(2);
+  }
+
   function takeControl(attractS) {
     playing = true;
     sEst = attractS;
@@ -130,14 +141,21 @@ export function createDrive(curve, length) {
         else return null;
       }
 
-      // reset: back onto the centreline, facing forward, at walking pace
+      // reset: back to a sane spot, facing forward, at walking pace
       if (inp.reset) {
-        refineS();
-        const { p, t } = frameAt(curve, length, sEst);
-        pos.copy(p); pos.y = 0;
-        yaw = Math.atan2(t.x, t.z);
-        yawVel = 0;
-        vel.set(t.x, 0, t.z).multiplyScalar(3);
+        if (world) {
+          pos.set(world.spawn.pos[0], 0, world.spawn.pos[2]);
+          yaw = world.spawn.yaw; yawVel = 0;
+          heading.set(Math.sin(yaw), 0, Math.cos(yaw));
+          vel.copy(heading).multiplyScalar(2);
+        } else {
+          refineS();
+          const { p, t } = frameAt(curve, length, sEst);
+          pos.copy(p); pos.y = 0;
+          yaw = Math.atan2(t.x, t.z);
+          yawVel = 0;
+          vel.set(t.x, 0, t.z).multiplyScalar(3);
+        }
       }
 
       heading.set(Math.sin(yaw), 0, Math.cos(yaw));
@@ -184,19 +202,29 @@ export function createDrive(curve, length) {
 
       pos.addScaledVector(vel, dt);
 
-      // stay inside the fenced corridor
-      refineS();
-      const fr = frameAt(curve, length, sEst);
-      tmp.subVectors(pos, fr.p);
-      const lateral = tmp.dot(fr.r);
-      if (Math.abs(lateral) > TRACK_HALF) {
-        const over = lateral - Math.sign(lateral) * TRACK_HALF;
-        pos.addScaledVector(fr.r, -over);
-        const vLat = vel.dot(fr.r);
-        if (Math.sign(vLat) === Math.sign(lateral)) {
-          vel.addScaledVector(fr.r, -vLat * 1.35); // soft bounce
-          vel.multiplyScalar(0.92);
-          if (wallBuzz <= 0 && speed > 8) { rumble(0.7, 0.4, 130); wallBuzz = 0.35; }
+      if (world) {
+        // free roam: collide against buildings (hard) and curbs (soft)
+        const fb = world.collision.resolve(pos, 1.5, vel);
+        if (fb.onCurb) {
+          vel.multiplyScalar(Math.max(0, 1 - 2.2 * dt)); // sidewalk scrub
+          if (wallBuzz <= 0 && speed > 6) { rumble(0.4, 0.5, 90); wallBuzz = 0.3; }
+        }
+        if (fb.hitHard && wallBuzz <= 0 && speed > 5) { rumble(0.8, 0.5, 150); wallBuzz = 0.35; }
+      } else {
+        // stay inside the fenced corridor
+        refineS();
+        const fr = frameAt(curve, length, sEst);
+        tmp.subVectors(pos, fr.p);
+        const lateral = tmp.dot(fr.r);
+        if (Math.abs(lateral) > TRACK_HALF) {
+          const over = lateral - Math.sign(lateral) * TRACK_HALF;
+          pos.addScaledVector(fr.r, -over);
+          const vLat = vel.dot(fr.r);
+          if (Math.sign(vLat) === Math.sign(lateral)) {
+            vel.addScaledVector(fr.r, -vLat * 1.35); // soft bounce
+            vel.multiplyScalar(0.92);
+            if (wallBuzz <= 0 && speed > 8) { rumble(0.7, 0.4, 130); wallBuzz = 0.35; }
+          }
         }
       }
       wallBuzz = Math.max(0, wallBuzz - dt);
@@ -230,7 +258,7 @@ export function createDrive(curve, length) {
         throttle: inp.throttle,
         brake: inp.brake,
         horn: inp.horn,
-        s: sEst,
+        s: world ? 0 : sEst,
       };
     },
   };
