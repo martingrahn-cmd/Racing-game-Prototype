@@ -24,6 +24,9 @@ export function createSkidmarks(scene) {
 
   const mat = new THREE.ShaderMaterial({
     transparent: true,
+    side: THREE.DoubleSide, // moving-streak quads wind front-face-down; without
+                            // this WebGL back-face-culls them and only the
+                            // up-facing standing-burnout patch is ever visible
     depthWrite: false,
     polygonOffset: true,
     polygonOffsetFactor: -1,
@@ -70,7 +73,13 @@ export function createSkidmarks(scene) {
 
   return {
     update(dt, st) {
-      const marking = st && (st.slip > 2.4 || (st.throttle > 0.6 && st.speed < 7));
+      // A held handbrake locks the rear wheels, so they lay rubber the whole
+      // time the car is moving — even at low slip angle (straight-line lockup)
+      // or the instant a spinning slide momentarily re-aligns velocity with
+      // heading. Below ~2.5 m/s this hands off to the standing-burnout patch
+      // below, so gentle low-speed handbrake taps / parking still leave nothing.
+      const marking = st && (st.slip > 2.4 || (st.hand && st.speed > 2.5)
+        || (st.throttle > 0.6 && st.speed < 7));
 
       // standing burnout: no travel, so darken a clean tire-shaped patch
       // (overlapping low-alpha quads accumulate into rich black rubber)
