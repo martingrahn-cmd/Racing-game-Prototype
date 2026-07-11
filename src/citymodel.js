@@ -1,69 +1,70 @@
 // City model — the data spine of the open world. No geometry here, just
-// numbers: everything (roads, sidewalks, buildings, colliders, signals,
-// traffic, pedestrians) is generated from this description so the world stays
-// consistent when the model changes.
+// numbers: everything (roads, sidewalks, buildings, colliders, signals) is
+// generated from this so the world stays consistent when the model changes.
 //
-// Phase 1 = the vertical slice: one 4-way intersection at the origin with four
-// corner blocks, sized so it tiles into the full grid later.
+// Phase 2 = the district: a BLOCKS×BLOCKS grid of city blocks separated by a
+// street grid, with a central plaza. Sized to ~500 m and designed to tile
+// further into neighbouring districts later.
 
 const ROAD_HW = 7;        // road half-width → 14 m two-lane street
 const LANE = 3.5;         // lane centre offset (right-hand traffic)
 const SIDEWALK = 4.5;     // sidewalk depth between curb and building
 const CURB_Y = 0.18;      // curb / sidewalk height
-const BLOCK_OUT = 52;     // block outer extent from centre
-const ROAD_LEN = 62;      // how far the streets run out of the slice
+const PITCH = 100;        // spacing between intersections
+const BLOCKS = 5;         // blocks per axis (odd → a true centre block for the plaza)
 
-export function createSliceModel() {
-  const inner = ROAD_HW + SIDEWALK;   // 11.5 — building footprint starts here
-  const outer = BLOCK_OUT - 2;        // small margin on the far sides
+const KINDS = ['glass', 'ribbon', 'glass', 'residential', 'glass'];
 
-  // four corner blocks, one per quadrant — each with its own character
-  const quads = [[1, 1], [1, -1], [-1, 1], [-1, -1]];
-  const specs = [
-    { kind: 'glass', height: 58, inset: 0 },        // NE — signature tower
-    { kind: 'ribbon', height: 31, inset: 3 },       // SE — mid-rise, set back
-    { kind: 'residential', height: 39, inset: 2 },  // NW
-    { kind: 'glass', height: 25, inset: 5 },        // SW — low, open forecourt
-  ];
-  const buildings = quads.map(([sx, sz], i) => {
-    const s = specs[i];
-    const inIn = inner + s.inset, inOut = outer - s.inset * 0.5;
-    return {
-      minX: sx > 0 ? inIn : -inOut,
-      maxX: sx > 0 ? inOut : -inIn,
-      minZ: sz > 0 ? inIn : -inOut,
-      maxZ: sz > 0 ? inOut : -inIn,
-      height: s.height, kind: s.kind, quad: [sx, sz],
-    };
-  });
+export function createCityModel() {
+  const half = BLOCKS / 2;
+  const nodes = [];
+  for (let i = 0; i <= BLOCKS; i++) nodes.push(Math.round((i - half) * PITCH));
+  const min = nodes[0], max = nodes[nodes.length - 1];
 
-  // raised sidewalk slabs fill the whole corner between the road cross and the
-  // block edge; the building sits on top with a sidewalk margin around it
-  const sidewalks = quads.map(([sx, sz]) => ({
-    minX: sx > 0 ? ROAD_HW : -BLOCK_OUT,
-    maxX: sx > 0 ? BLOCK_OUT : -ROAD_HW,
-    minZ: sz > 0 ? ROAD_HW : -BLOCK_OUT,
-    maxZ: sz > 0 ? BLOCK_OUT : -ROAD_HW,
-  }));
-
-  // distant filler silhouettes so the streets read as a city, not a void
-  const filler = [];
-  for (const [sx, sz] of quads) {
-    for (let k = 0; k < 3; k++) {
-      const along = 74 + k * 26;
-      filler.push({ x: sx * (ROAD_HW + 16 + k * 4), z: sz * along, w: 22, d: 20, h: 26 + ((k * 13) % 30) });
-      filler.push({ x: sx * along, z: sz * (ROAD_HW + 16 + k * 4), w: 20, d: 22, h: 30 + ((k * 7) % 26) });
+  // intersections at every grid node; signalise the interior ones (the
+  // perimeter nodes are the district edge)
+  const intersections = [];
+  const signalized = [];
+  for (let i = 0; i <= BLOCKS; i++) {
+    for (let j = 0; j <= BLOCKS; j++) {
+      const it = { x: nodes[i], z: nodes[j], i, j };
+      intersections.push(it);
+      if (i >= 1 && i <= BLOCKS - 1 && j >= 1 && j <= BLOCKS - 1) signalized.push(it);
     }
   }
 
+  // blocks: one building per block, except the central block which is a plaza
+  const mid = (BLOCKS - 1) / 2; // block index of the centre (BLOCKS odd → integer)
+  const buildings = [];
+  let plaza = null;
+  for (let bi = 0; bi < BLOCKS; bi++) {
+    for (let bj = 0; bj < BLOCKS; bj++) {
+      const x0 = nodes[bi] + ROAD_HW, x1 = nodes[bi + 1] - ROAD_HW;
+      const z0 = nodes[bj] + ROAD_HW, z1 = nodes[bj + 1] - ROAD_HW;
+      const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+      const slab = { minX: x0, maxX: x1, minZ: z0, maxZ: z1 };
+      if (bi === mid && bj === mid) { plaza = { ...slab, cx, cz }; continue; }
+      const kind = KINDS[(bi * 3 + bj) % KINDS.length];
+      // deterministic height variety, with the occasional signature tower
+      const r = (bi * 7 + bj * 13) % 5;
+      const tall = (bi + bj) % 3 === 0;
+      const height = 26 + r * 8 + (tall ? 34 : 0);
+      buildings.push({
+        minX: x0 + SIDEWALK, maxX: x1 - SIDEWALK,
+        minZ: z0 + SIDEWALK, maxZ: z1 - SIDEWALK,
+        slab, height, kind, cx, cz,
+      });
+    }
+  }
+
+  const sx = nodes[mid] - LANE;                 // right lane of a central vertical street
+  const sz = (nodes[0] + nodes[1]) / 2;         // a couple of blocks south, facing in
+
   return {
-    ROAD_HW, LANE, SIDEWALK, CURB_Y, BLOCK_OUT, ROAD_LEN,
-    intersection: { x: 0, z: 0 },
-    buildings,
-    sidewalks,
-    filler,
-    signals: { greenSec: 8, yellowSec: 2.2, allRedSec: 1.2 },
-    // start on the southern approach, right lane, facing north (+z)
-    spawn: { pos: [-LANE, 0, -34], yaw: 0 },
+    ROAD_HW, LANE, SIDEWALK, CURB_Y, PITCH, BLOCKS,
+    nodes, min, max,
+    intersections, signalized,
+    buildings, plaza,
+    spawn: { pos: [sx, 0, sz], yaw: 0 },
   };
 }

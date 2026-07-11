@@ -14,7 +14,7 @@ import { createSmoke } from './smoke.js';
 import { createSkidmarks } from './skidmarks.js';
 import { createDayNight } from './daynight.js';
 import { createMinimap } from './minimap.js';
-import { createSliceModel } from './citymodel.js';
+import { createCityModel } from './citymodel.js';
 import { buildWorld } from './world.js';
 import { createSignals } from './signals.js';
 import { createCollision } from './collision.js';
@@ -88,7 +88,7 @@ const skidmarks = createSkidmarks(scene);
 let curve = null, length = 0, cornerSpans = null;
 let extras = null, traffic = null, minimap = null, signals = null, drive;
 if (WORLD) {
-  const model = createSliceModel();
+  const model = createCityModel();
   const worldObj = buildWorld(scene, model);
   signals = createSignals(scene, model);
   const collision = createCollision(model, {
@@ -96,7 +96,7 @@ if (WORLD) {
     obstacles: [...worldObj.obstacles, ...signals.obstacles],
   });
   drive = createDrive(null, 0, { world: { spawn: model.spawn, collision, curbY: model.CURB_Y } });
-  scene.fog.near = 72; scene.fog.far = 240; // pull the horizon in for the slice
+  scene.fog.near = 110; scene.fog.far = 560; // atmospheric fade at the district edge
   const mm = document.getElementById('minimap'); if (mm) mm.style.display = 'none';
 } else {
   ({ curve, length, cornerSpans } = buildTrack(scene));

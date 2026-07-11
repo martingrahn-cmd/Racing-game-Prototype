@@ -1,13 +1,14 @@
-// Builds the open-world slice geometry from the city model: asphalt, lane
-// markings, raised sidewalks with curbs, corner buildings (reusing the
-// procedural facades), and distant filler silhouettes. Returns the static
-// colliders the driving/collision code needs.
+// Builds the open-world district geometry from the city model: asphalt street
+// grid, lane markings, raised sidewalks with curbs, corner buildings (glassy
+// facades, reused procedural textures), a central plaza (fountain, statue,
+// trees, swings), and distant filler silhouettes. Returns the static colliders
+// and knockable obstacles the driving/collision code needs.
 import * as THREE from 'three';
 import {
   makeSidewalkTexture, makeConcreteKerbTexture, makeRoofTexture,
   makeFacadeGlass, makeFacadeRibbon, makeFacadeResidential,
 } from './textures.js';
-import { registerEmissive } from './night.js';
+import { registerEmissive, registerOpacity } from './night.js';
 
 function makeAsphalt() {
   const c = document.createElement('canvas');
@@ -29,82 +30,75 @@ function makeAsphalt() {
 export function buildWorld(scene, model) {
   const group = new THREE.Group();
   scene.add(group);
-  const { ROAD_HW, CURB_Y, ROAD_LEN } = model;
-  const obstacles = []; // knockable street furniture
+  const { ROAD_HW, CURB_Y, nodes, min, max } = model;
+  const obstacles = [];
+  const span = max - min;
 
   // -------------------------------------------------- ground / asphalt
   const asphalt = makeAsphalt();
-  asphalt.repeat.set(28, 28);
+  asphalt.repeat.set((span + 400) / 20, (span + 400) / 20);
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(560, 560),
-    // lower roughness + a touch of metalness gives the asphalt a wet-look moon
-    // sheen at night, so it catches moonlight like the sidewalk does
+    new THREE.PlaneGeometry(span + 400, span + 400),
     new THREE.MeshStandardMaterial({ map: asphalt, roughness: 0.62, metalness: 0.04 }),
   );
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
   group.add(ground);
 
-  // -------------------------------------------------- lane markings
+  // -------------------------------------------------- lane markings (merged)
   const markMat = new THREE.MeshStandardMaterial({
     color: 0xd9d6c8, roughness: 0.6, metalness: 0,
     emissive: 0xcfc9b4, emissiveIntensity: 0,
   });
-  registerEmissive(markMat, 0, 0.3); // retroreflective glow at night
+  registerEmissive(markMat, 0, 0.3);
   const markGeos = [];
   const stripe = (cx, cz, w, d) => {
     const g = new THREE.PlaneGeometry(w, d);
-    g.rotateX(-Math.PI / 2);
-    g.translate(cx, 0.02, cz);
+    g.rotateX(-Math.PI / 2); g.translate(cx, 0.02, cz);
     markGeos.push(g);
   };
-  const gap = ROAD_HW + 3; // clear the intersection box
-  // centre dashes + edge lines along the Z road (runs in z, width in x)
-  for (let z = -ROAD_LEN; z <= ROAD_LEN; z += 4.2) {
-    if (Math.abs(z) < gap) continue;
-    stripe(0, z, 0.18, 2.4);
-  }
-  // edge lines along the X road
-  for (let x = -ROAD_LEN; x <= ROAD_LEN; x += 4.2) {
-    if (Math.abs(x) < gap) continue;
-    stripe(x, 0, 2.4, 0.18);
-  }
-  // solid edge lines (split around the intersection)
-  for (const s of [-1, 1]) {
-    const a = (ROAD_LEN + gap) / 2, c = s * (gap + ROAD_LEN) / 2;
-    const half = (ROAD_LEN - gap) / 2, mid = s * (gap + ROAD_LEN) / 2;
-    for (const e of [-(ROAD_HW - 0.35), ROAD_HW - 0.35]) {
-      stripe(e, mid, 0.14, half * 2);   // Z road edges
-      stripe(mid, e, half * 2, 0.14);   // X road edges
+  const gap = ROAD_HW + 3;
+  const EDGE = ROAD_HW - 0.35;
+  // per street segment: centre dashes + edge lines (skip the intersection box)
+  for (let a = 0; a < nodes.length; a++) {
+    for (let s = 0; s < nodes.length - 1; s++) {
+      const from = nodes[s] + gap, to = nodes[s + 1] - gap;
+      // vertical street x = nodes[a], segment along z
+      for (let z = from; z <= to; z += 4.4) stripe(nodes[a], z, 0.18, 2.4);
+      stripe(nodes[a] - EDGE, (nodes[s] + nodes[s + 1]) / 2, 0.14, (to - from));
+      stripe(nodes[a] + EDGE, (nodes[s] + nodes[s + 1]) / 2, 0.14, (to - from));
+      // horizontal street z = nodes[a], segment along x
+      for (let x = from; x <= to; x += 4.4) stripe(x, nodes[a], 2.4, 0.18);
+      stripe((nodes[s] + nodes[s + 1]) / 2, nodes[a] - EDGE, (to - from), 0.14);
+      stripe((nodes[s] + nodes[s + 1]) / 2, nodes[a] + EDGE, (to - from), 0.14);
     }
   }
-  // crosswalks + stop lines on all four approaches
-  const approaches = [['z', -1], ['z', 1], ['x', -1], ['x', 1]];
-  for (const [axis, s] of approaches) {
-    const at = s * (ROAD_HW + 1.6);
-    for (let b = -6; b <= 6; b += 1.5) { // zebra bars
-      if (axis === 'z') stripe(b, at, 0.5, 3.0);
-      else stripe(at, b, 3.0, 0.5);
+  // crosswalks on the four approaches of each signalised intersection
+  for (const it of model.signalized) {
+    for (const [ax, az] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
+      const at = ROAD_HW + 1.6;
+      for (let b = -6; b <= 6; b += 1.5) {
+        if (az !== 0) stripe(it.x + b, it.z + az * at, 0.5, 3.0);
+        else stripe(it.x + ax * at, it.z + b, 3.0, 0.5);
+      }
     }
-    const stopAt = s * (ROAD_HW + 3.4);
-    if (axis === 'z') stripe(-s * (ROAD_HW / 2 + 0.5), stopAt, ROAD_HW - 0.6, 0.32);
-    else stripe(stopAt, -s * (ROAD_HW / 2 + 0.5), 0.32, ROAD_HW - 0.6);
   }
-  // merge markings into one mesh
   const markMesh = new THREE.Mesh(mergeFlat(markGeos), markMat);
   markMesh.renderOrder = 1;
   group.add(markMesh);
 
   // -------------------------------------------------- sidewalks + curbs
-  const swTex = makeSidewalkTexture(); swTex.repeat.set(7, 7);
+  const swTex = makeSidewalkTexture(); swTex.repeat.set(10, 10);
   const curbTex = makeConcreteKerbTexture();
   const swTop = new THREE.MeshStandardMaterial({ map: swTex, roughness: 0.9, metalness: 0 });
   const curbSide = new THREE.MeshStandardMaterial({ map: curbTex, roughness: 0.85, metalness: 0 });
-  for (const s of model.sidewalks) {
+  const slabs = model.buildings.map((b) => b.slab);
+  if (model.plaza) slabs.push(model.plaza);
+  for (const s of slabs) {
     const w = s.maxX - s.minX, d = s.maxZ - s.minZ;
     const box = new THREE.Mesh(
       new THREE.BoxGeometry(w, CURB_Y, d),
-      [curbSide, curbSide, swTop, curbSide, curbSide, curbSide], // +x -x +y -y +z -z
+      [curbSide, curbSide, swTop, curbSide, curbSide, curbSide],
     );
     box.position.set((s.minX + s.maxX) / 2, CURB_Y / 2, (s.minZ + s.maxZ) / 2);
     box.receiveShadow = true;
@@ -112,129 +106,178 @@ export function buildWorld(scene, model) {
   }
 
   // -------------------------------------------------- buildings
-  const facades = {
-    glass: makeFacadeGlass(),
-    ribbon: makeFacadeRibbon(),
-    residential: makeFacadeResidential(),
-  };
-  const roofTex = makeRoofTexture();
-  const roofMat = new THREE.MeshStandardMaterial({ map: roofTex, roughness: 0.9, metalness: 0 });
-  const awnings = [0x8a3f39, 0x3d5c48, 0x41546e, 0x7a6a4a];
-  const tints = [0xffffff, 0xf1ece2, 0xe6eef5, 0xfff2e6];
+  const facades = { glass: makeFacadeGlass(), ribbon: makeFacadeRibbon(), residential: makeFacadeResidential() };
+  const roofMat = new THREE.MeshStandardMaterial({ map: makeRoofTexture(), roughness: 0.9, metalness: 0 });
   const doorGlass = new THREE.MeshStandardMaterial({ color: 0x161d24, roughness: 0.12, metalness: 0.65 });
   const frameMat = new THREE.MeshStandardMaterial({ color: 0x3b4048, roughness: 0.7, metalness: 0.25 });
-  const mastMat = new THREE.MeshStandardMaterial({ color: 0x33373d, roughness: 0.6, metalness: 0.7 });
-  const trimMat = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, roughness: 0.4, metalness: 0.65 });
   const bollardMat = new THREE.MeshStandardMaterial({ color: 0x1c1f24, roughness: 0.6, metalness: 0.5 });
+  const mastMat = new THREE.MeshStandardMaterial({ color: 0x33373d, roughness: 0.6, metalness: 0.7 });
   const sconceMat = new THREE.MeshStandardMaterial({ color: 0x2a2418, emissive: 0xffdca0, emissiveIntensity: 0.08, roughness: 0.5 });
-  registerEmissive(sconceMat, 0.08, 2.0);       // entrance lamps, glow at night
+  registerEmissive(sconceMat, 0.08, 2.0);
   const signMat = new THREE.MeshStandardMaterial({ color: 0x151b22, emissive: 0xbfe0ff, emissiveIntensity: 0.15, roughness: 0.4 });
-  registerEmissive(signMat, 0.15, 1.7);         // lit signage band
+  registerEmissive(signMat, 0.15, 1.7);
+  const tints = [0xdfe9f2, 0xe9e2d2, 0xd2e6ec, 0xf0ebe0];
+  const awnings = [0x8a3f39, 0x3d5c48, 0x41546e, 0x7a6a4a];
+
   model.buildings.forEach((b, i) => {
     const w = b.maxX - b.minX, d = b.maxZ - b.minZ, h = b.height;
-    const cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2;
+    const cx = b.cx, cz = b.cz;
     const f = facades[b.kind];
     const tex = (t) => { const c = t.clone(); c.wrapS = c.wrapT = THREE.RepeatWrapping; c.needsUpdate = true; c.repeat.set(Math.max(1, Math.round(w / 12)), Math.max(2, Math.round(h / 5))); return c; };
-    const mat = new THREE.MeshStandardMaterial({
+    const glassy = b.kind === 'glass';
+    const matDef = {
       map: tex(f.map), normalMap: tex(f.normalMap), roughnessMap: tex(f.roughnessMap),
       emissive: 0xffffff, emissiveMap: tex(f.emissiveMap), emissiveIntensity: 0,
-      color: tints[i % tints.length], roughness: 1, metalness: 0,
-    });
-    registerEmissive(mat, 0, 1.25); // windows dark by day, lit at night
+      color: tints[i % tints.length], roughness: glassy ? 0.28 : 1, metalness: glassy ? 0.1 : 0,
+    };
+    // glass towers get a physical clearcoat for real sheen (vector-rails vibe)
+    const mat = glassy
+      ? new THREE.MeshPhysicalMaterial({ ...matDef, clearcoat: 0.6, clearcoatRoughness: 0.25 })
+      : new THREE.MeshStandardMaterial(matDef);
+    registerEmissive(mat, 0, 1.25);
     const box = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), [mat, mat, roofMat, roofMat, mat, mat]);
     box.position.set(cx, CURB_Y + h / 2, cz);
     box.castShadow = true; box.receiveShadow = true;
     group.add(box);
 
-    // rooftop mechanical penthouse for a varied skyline
+    // rooftop penthouse + beacon on the tall towers
     const ph = new THREE.Mesh(new THREE.BoxGeometry(w * 0.45, 3.2, d * 0.45), roofMat);
-    ph.position.set(cx, CURB_Y + h + 1.6, cz);
-    ph.castShadow = true; group.add(ph);
-    // aviation beacon + mast on the signature tower
-    if (h > 50) {
+    ph.position.set(cx, CURB_Y + h + 1.6, cz); ph.castShadow = true; group.add(ph);
+    if (h > 55) {
       const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.18, 12, 6), mastMat);
-      mast.position.set(cx, CURB_Y + h + 3.2 + 6, cz); group.add(mast);
+      mast.position.set(cx, CURB_Y + h + 9.2, cz); group.add(mast);
       const beaconMat = new THREE.MeshStandardMaterial({ color: 0x2a0000, emissive: 0xff2200, emissiveIntensity: 1.2 });
       registerEmissive(beaconMat, 1.2, 3.4);
       const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.35, 10, 8), beaconMat);
-      beacon.position.set(cx, CURB_Y + h + 3.2 + 12, cz); group.add(beacon);
+      beacon.position.set(cx, CURB_Y + h + 15.2, cz); group.add(beacon);
+    }
+    // additive glow bands on tall glass towers (night neon accent)
+    if (glassy && h > 45) {
+      for (let bnd = 0; bnd < 2; bnd++) {
+        const y = CURB_Y + h * (0.4 + bnd * 0.28);
+        const gb = new THREE.Mesh(new THREE.BoxGeometry(w + 0.2, 1.1, d + 0.2),
+          new THREE.MeshBasicMaterial({ color: bnd ? 0xffc27a : 0x66e0ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+        gb.position.set(cx, y, cz);
+        registerOpacity(gb.material, 0.0, 0.5); // dark by day, glowing at night
+        group.add(gb);
+      }
     }
 
-    // recessed street entrance on the face toward the intersection. The frame
-    // and reveals PROTRUDE while the glass sits flush, so the doorway reads as
-    // an inset portal with depth instead of a decal stuck on the wall.
-    const [sx] = b.quad;
-    const faceX = sx > 0 ? b.minX : b.maxX; // facade nearest the intersection
-    const nx = -sx;                          // outward normal toward the road
-    const yaw = nx > 0 ? Math.PI / 2 : -Math.PI / 2;
-    const DW = 5, DH = 3.6, REV = 0.75;      // opening width (z), height, reveal depth
-    // warm lobby glow, lit at night, sitting just inside the glass
-    const lobbyMat = new THREE.MeshStandardMaterial({ color: 0x120d06, emissive: 0xffdca0, emissiveIntensity: 0 });
-    registerEmissive(lobbyMat, 0, 0.85);
-    const lobby = new THREE.Mesh(new THREE.PlaneGeometry(DW - 0.4, DH - 0.4), lobbyMat);
-    lobby.position.set(faceX + nx * 0.02, CURB_Y + DH / 2, cz); lobby.rotation.y = yaw; group.add(lobby);
-    // dark reflective glass doors, flush on the facade
-    const glass = new THREE.Mesh(new THREE.PlaneGeometry(DW, DH), doorGlass);
-    glass.position.set(faceX + nx * 0.05, CURB_Y + DH / 2, cz); glass.rotation.y = yaw; group.add(glass);
-    // mullion between the two door leaves
-    const mull = new THREE.Mesh(new THREE.BoxGeometry(0.12, DH, 0.1), frameMat);
-    mull.position.set(faceX + nx * 0.08, CURB_Y + DH / 2, cz); group.add(mull);
-    // protruding jambs + lintel that frame (and recess) the glass
-    for (const s of [-1, 1]) {
-      const jamb = new THREE.Mesh(new THREE.BoxGeometry(REV, DH + 0.5, 0.45), frameMat);
-      jamb.position.set(faceX + nx * REV / 2, CURB_Y + (DH + 0.5) / 2, cz + s * (DW / 2 + 0.22));
-      jamb.castShadow = true; group.add(jamb);
-    }
-    const lintel = new THREE.Mesh(new THREE.BoxGeometry(REV, 0.55, DW + 0.9), frameMat);
-    lintel.position.set(faceX + nx * REV / 2, CURB_Y + DH + 0.27, cz);
-    lintel.castShadow = true; group.add(lintel);
-    // awning above, on two slim posts
-    const canopy = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.3, DW + 1.6),
-      new THREE.MeshStandardMaterial({ color: awnings[i % awnings.length], roughness: 0.85 }));
-    canopy.position.set(faceX + nx * 1.55, CURB_Y + DH + 0.78, cz);
-    canopy.castShadow = true; group.add(canopy);
-    for (const s of [-1, 1]) {
-      const h2 = CURB_Y + DH + 0.78;
-      const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, h2, 6), frameMat);
-      strut.position.set(faceX + nx * 2.7, h2 / 2, cz + s * (DW / 2 + 0.55)); group.add(strut);
-    }
-    // low threshold sill
-    const sill = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.12, DW + 0.4), frameMat);
-    sill.position.set(faceX + nx * 0.28, CURB_Y + 0.06, cz); group.add(sill);
-    // finer detail: wall sconces, door handles, bollards
-    for (const s of [-1, 1]) {
-      const sconce = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.5, 0.14), sconceMat);
-      sconce.position.set(faceX + nx * 0.16, CURB_Y + 2.7, cz + s * (DW / 2 + 0.42));
-      group.add(sconce);
-      const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.95, 6), trimMat);
-      handle.position.set(faceX + nx * 0.13, CURB_Y + 1.2, cz + s * 0.4);
-      group.add(handle);
-      const bollard = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.9, 10), bollardMat);
-      bollard.position.set(faceX + nx * 2.4, CURB_Y + 0.45, cz + s * (DW / 2 + 0.9));
-      bollard.castShadow = true; group.add(bollard);
-      obstacles.push({
-        x: bollard.position.x, z: bollard.position.z, r: 0.3, knocked: false,
-        knock: () => { bollard.rotation.x = 1.4; bollard.position.y = CURB_Y + 0.1; },
-      });
-    }
-    // illuminated signage band above the doors
-    const sign = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.5, DW - 0.6), signMat);
-    sign.position.set(faceX + nx * 0.13, CURB_Y + DH - 0.12, cz); group.add(sign);
+    addEntrance(group, obstacles, b, { doorGlass, frameMat, awn: awnings[i % awnings.length], frameMat2: frameMat, bollardMat, sconceMat, signMat, curbSide }, CURB_Y);
   });
+
+  if (model.plaza) buildPlaza(group, model.plaza, CURB_Y);
 
   // -------------------------------------------------- distant filler
   const fillerMat = new THREE.MeshStandardMaterial({ color: 0x2b313b, roughness: 1, metalness: 0 });
-  for (const f of model.filler) {
-    const box = new THREE.Mesh(new THREE.BoxGeometry(f.w, f.h, f.d), fillerMat);
-    box.position.set(f.x, f.h / 2, f.z);
-    box.castShadow = true;
-    group.add(box);
+  const ring = max + 70;
+  for (let k = -3; k <= 3; k++) {
+    for (const sgn of [-1, 1]) {
+      const off = k * 60 + (k % 2 ? 18 : 0);
+      const h1 = 28 + ((k * 17 + 40) % 34);
+      let bx = new THREE.Mesh(new THREE.BoxGeometry(24, h1, 22), fillerMat);
+      bx.position.set(off, h1 / 2, sgn * ring); bx.castShadow = true; group.add(bx);
+      const h2 = 30 + ((k * 11 + 20) % 30);
+      bx = new THREE.Mesh(new THREE.BoxGeometry(22, h2, 24), fillerMat);
+      bx.position.set(sgn * ring, h2 / 2, off); bx.castShadow = true; group.add(bx);
+    }
   }
 
-  return { group, colliders: { buildings: model.buildings }, obstacles };
+  const buildingAABBs = model.buildings.map((b) => ({ minX: b.minX, maxX: b.maxX, minZ: b.minZ, maxZ: b.maxZ }));
+  return { group, colliders: { buildings: buildingAABBs }, obstacles };
 }
 
-// Minimal geometry merge for the flat marking planes (position + uv only).
+// street entrance on the building's south (-z) face: recessed portal with frame,
+// awning, signage, sconces and knockable bollards
+function addEntrance(group, obstacles, b, m, CURB_Y) {
+  const cx = b.cx, faceZ = b.minZ, nz = -1;
+  const DW = 5, DH = 3.6, REV = 0.75;
+  const lobbyMat = new THREE.MeshStandardMaterial({ color: 0x120d06, emissive: 0xffdca0, emissiveIntensity: 0 });
+  registerEmissive(lobbyMat, 0, 0.85);
+  const lobby = new THREE.Mesh(new THREE.PlaneGeometry(DW - 0.4, DH - 0.4), lobbyMat);
+  lobby.position.set(cx, CURB_Y + DH / 2, faceZ + nz * 0.02); lobby.rotation.y = Math.PI; group.add(lobby);
+  const glass = new THREE.Mesh(new THREE.PlaneGeometry(DW, DH), m.doorGlass);
+  glass.position.set(cx, CURB_Y + DH / 2, faceZ + nz * 0.05); glass.rotation.y = Math.PI; group.add(glass);
+  for (const s of [-1, 1]) {
+    const jamb = new THREE.Mesh(new THREE.BoxGeometry(0.45, DH + 0.5, REV), m.frameMat);
+    jamb.position.set(cx + s * (DW / 2 + 0.22), CURB_Y + (DH + 0.5) / 2, faceZ + nz * REV / 2);
+    jamb.castShadow = true; group.add(jamb);
+  }
+  const lintel = new THREE.Mesh(new THREE.BoxGeometry(DW + 0.9, 0.55, REV), m.frameMat);
+  lintel.position.set(cx, CURB_Y + DH + 0.27, faceZ + nz * REV / 2); lintel.castShadow = true; group.add(lintel);
+  const canopy = new THREE.Mesh(new THREE.BoxGeometry(DW + 1.6, 0.3, 2.6),
+    new THREE.MeshStandardMaterial({ color: m.awn, roughness: 0.85 }));
+  canopy.position.set(cx, CURB_Y + DH + 0.78, faceZ + nz * 1.55); canopy.castShadow = true; group.add(canopy);
+  const sign = new THREE.Mesh(new THREE.BoxGeometry(DW - 0.6, 0.5, 0.08), m.signMat);
+  sign.position.set(cx, CURB_Y + DH - 0.12, faceZ + nz * 0.13); group.add(sign);
+  for (const s of [-1, 1]) {
+    const sconce = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.5, 0.16), m.sconceMat);
+    sconce.position.set(cx + s * (DW / 2 + 0.42), CURB_Y + 2.7, faceZ + nz * 0.16); group.add(sconce);
+    const bollard = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.9, 10), m.bollardMat);
+    bollard.position.set(cx + s * (DW / 2 + 0.9), CURB_Y + 0.45, faceZ + nz * 2.4);
+    bollard.castShadow = true; group.add(bollard);
+    obstacles.push({ x: bollard.position.x, z: bollard.position.z, r: 0.3, knocked: false,
+      knock: () => { bollard.rotation.x = 1.4; bollard.position.y = CURB_Y + 0.1; } });
+  }
+}
+
+// central plaza: fountain, statue, trees, a small playground
+function buildPlaza(group, plaza, CURB_Y) {
+  const { cx, cz } = plaza;
+  const stone = new THREE.MeshStandardMaterial({ color: 0xb7b1a4, roughness: 0.8, metalness: 0.05 });
+  const grass = new THREE.MeshStandardMaterial({ color: 0x5f8f4e, roughness: 0.95, metalness: 0 });
+  const trunk = new THREE.MeshStandardMaterial({ color: 0x6d5b3f, roughness: 0.85 });
+  const leaf = new THREE.MeshStandardMaterial({ color: 0x4e8f45, roughness: 0.9 });
+  const metal = new THREE.MeshStandardMaterial({ color: 0x7c8790, roughness: 0.4, metalness: 0.6 });
+  // grass pad
+  const w = plaza.maxX - plaza.minX, d = plaza.maxZ - plaza.minZ;
+  const pad = new THREE.Mesh(new THREE.BoxGeometry(w - 3, 0.05, d - 3), grass);
+  pad.position.set(cx, CURB_Y + 0.03, cz); pad.receiveShadow = true; group.add(pad);
+  // fountain
+  const basin = new THREE.Mesh(new THREE.CylinderGeometry(6, 6.4, 0.9, 28), stone);
+  basin.position.set(cx, CURB_Y + 0.45, cz); basin.castShadow = true; group.add(basin);
+  const waterMat = new THREE.MeshStandardMaterial({ color: 0x2f6f8f, emissive: 0x123040, emissiveIntensity: 0.2, roughness: 0.1, metalness: 0.3, transparent: true, opacity: 0.85 });
+  registerEmissive(waterMat, 0.2, 0.8);
+  const water = new THREE.Mesh(new THREE.CylinderGeometry(5.6, 5.6, 0.2, 28), waterMat);
+  water.position.set(cx, CURB_Y + 0.85, cz); group.add(water);
+  const jet = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.6, 3.2, 12), stone);
+  jet.position.set(cx, CURB_Y + 2.2, cz); group.add(jet);
+  // statue on a pedestal
+  const ped = new THREE.Mesh(new THREE.BoxGeometry(2.4, 2.2, 2.4), stone);
+  ped.position.set(cx - 14, CURB_Y + 1.1, cz + 12); ped.castShadow = true; group.add(ped);
+  const figure = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.7, 3.4, 10), metal);
+  figure.position.set(cx - 14, CURB_Y + 3.9, cz + 12); figure.castShadow = true; group.add(figure);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.55, 12, 10), metal);
+  head.position.set(cx - 14, CURB_Y + 5.9, cz + 12); group.add(head);
+  // trees at the corners
+  for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+    const tx = cx + sx * (w / 2 - 6), tz = cz + sz * (d / 2 - 6);
+    const tr = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.5, 3.4, 8), trunk);
+    tr.position.set(tx, CURB_Y + 1.7, tz); tr.castShadow = true; group.add(tr);
+    const cr = new THREE.Mesh(new THREE.SphereGeometry(2.6, 12, 10), leaf);
+    cr.position.set(tx, CURB_Y + 4.6, tz); cr.scale.y = 0.85; cr.castShadow = true; group.add(cr);
+  }
+  // playground swing set
+  const gx = cx + 15, gz = cz - 13;
+  for (const s of [-1, 1]) {
+    const leg1 = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 3.4, 6), metal);
+    leg1.position.set(gx - 2.2, CURB_Y + 1.7, gz + s * 1.6); leg1.rotation.x = s * 0.28; group.add(leg1);
+    const leg2 = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 3.4, 6), metal);
+    leg2.position.set(gx + 2.2, CURB_Y + 1.7, gz + s * 1.6); leg2.rotation.x = s * 0.28; group.add(leg2);
+  }
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 4.8, 6), metal);
+  beam.rotation.z = Math.PI / 2; beam.position.set(gx, CURB_Y + 3.3, gz); group.add(beam);
+  for (const off of [-1.2, 1.2]) {
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.1, 0.35), new THREE.MeshStandardMaterial({ color: 0x333a3f, roughness: 0.8 }));
+    seat.position.set(gx + off, CURB_Y + 1.0, gz); group.add(seat);
+    for (const s of [-1, 1]) {
+      const chain = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 2.3, 4), metal);
+      chain.position.set(gx + off, CURB_Y + 2.15, gz + s * 0.15); group.add(chain);
+    }
+  }
+}
+
+// Minimal geometry merge for flat marking planes (position + uv only).
 function mergeFlat(geos) {
   let vc = 0, ic = 0;
   for (const g of geos) { vc += g.attributes.position.count; ic += g.index.count; }
