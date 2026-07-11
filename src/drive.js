@@ -219,6 +219,7 @@ export function createDrive(curve, length, opts = {}) {
         onCurbPrev = fb.onCurb;
         const targetY = fb.onCurb ? (world.curbY || 0) : 0;
         pos.y += (targetY - pos.y) * Math.min(1, 9 * dt); // ride up/down the curb
+        if (fb.knocked) { vel.multiplyScalar(0.65); rumble(0.9, 0.7, 180); } // ploughed a pole
         if (fb.hitHard && wallBuzz <= 0 && speed > 5) { rumble(0.8, 0.5, 150); wallBuzz = 0.35; }
       } else {
         // stay inside the fenced corridor

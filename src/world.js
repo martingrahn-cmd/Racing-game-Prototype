@@ -13,9 +13,9 @@ function makeAsphalt() {
   const c = document.createElement('canvas');
   c.width = c.height = 256;
   const x = c.getContext('2d');
-  x.fillStyle = '#45464b'; x.fillRect(0, 0, 256, 256);
+  x.fillStyle = '#4d4e55'; x.fillRect(0, 0, 256, 256);
   for (let i = 0; i < 2600; i++) {
-    const g = 40 + Math.floor(Math.random() * 34);
+    const g = 48 + Math.floor(Math.random() * 34);
     x.fillStyle = `rgba(${g},${g},${g + 2},0.5)`;
     x.fillRect(Math.random() * 256, Math.random() * 256, 1.4, 1.4);
   }
@@ -30,13 +30,16 @@ export function buildWorld(scene, model) {
   const group = new THREE.Group();
   scene.add(group);
   const { ROAD_HW, CURB_Y, ROAD_LEN } = model;
+  const obstacles = []; // knockable street furniture
 
   // -------------------------------------------------- ground / asphalt
   const asphalt = makeAsphalt();
   asphalt.repeat.set(28, 28);
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(560, 560),
-    new THREE.MeshStandardMaterial({ map: asphalt, roughness: 0.96, metalness: 0 }),
+    // lower roughness + a touch of metalness gives the asphalt a wet-look moon
+    // sheen at night, so it catches moonlight like the sidewalk does
+    new THREE.MeshStandardMaterial({ map: asphalt, roughness: 0.62, metalness: 0.04 }),
   );
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
@@ -209,6 +212,10 @@ export function buildWorld(scene, model) {
       const bollard = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.9, 10), bollardMat);
       bollard.position.set(faceX + nx * 2.4, CURB_Y + 0.45, cz + s * (DW / 2 + 0.9));
       bollard.castShadow = true; group.add(bollard);
+      obstacles.push({
+        x: bollard.position.x, z: bollard.position.z, r: 0.3, knocked: false,
+        knock: () => { bollard.rotation.x = 1.4; bollard.position.y = CURB_Y + 0.1; },
+      });
     }
     // illuminated signage band above the doors
     const sign = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.5, DW - 0.6), signMat);
@@ -224,7 +231,7 @@ export function buildWorld(scene, model) {
     group.add(box);
   }
 
-  return { group, colliders: { buildings: model.buildings } };
+  return { group, colliders: { buildings: model.buildings }, obstacles };
 }
 
 // Minimal geometry merge for the flat marking planes (position + uv only).

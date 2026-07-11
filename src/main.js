@@ -91,7 +91,10 @@ if (WORLD) {
   const model = createSliceModel();
   const worldObj = buildWorld(scene, model);
   signals = createSignals(scene, model);
-  const collision = createCollision(model, worldObj.colliders);
+  const collision = createCollision(model, {
+    buildings: worldObj.colliders.buildings,
+    obstacles: [...worldObj.obstacles, ...signals.obstacles],
+  });
   drive = createDrive(null, 0, { world: { spawn: model.spawn, collision, curbY: model.CURB_Y } });
   scene.fog.near = 72; scene.fog.far = 240; // pull the horizon in for the slice
   const mm = document.getElementById('minimap'); if (mm) mm.style.display = 'none';

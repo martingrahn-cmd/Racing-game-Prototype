@@ -41,6 +41,7 @@ export function createSignals(scene, model) {
   const poleMat = new THREE.MeshStandardMaterial({ color: 0x23262b, roughness: 0.7, metalness: 0.5 });
   const housingMat = new THREE.MeshStandardMaterial({ color: 0x15171a, roughness: 0.8, metalness: 0.2 });
   const poles = [];
+  const obstacles = []; // knockable: plough through a pole and it topples
 
   for (const def of poleDefs) {
     const [cx, cz] = def.corner;
@@ -87,6 +88,10 @@ export function createSignals(scene, model) {
       lamps[name] = mat;
     });
     poles.push({ axis: def.axis, lamps });
+    obstacles.push({
+      x: cx, z: cz, r: 0.45, knocked: false,
+      knock: () => { pole.rotation.x = (cz >= 0 ? 1 : -1) * 1.4; pole.position.y = 0.15; },
+    });
   }
 
   function paint() {
@@ -103,6 +108,7 @@ export function createSignals(scene, model) {
 
   return {
     group,
+    obstacles,
     getState() { return state; },
     update(dt) {
       clock = (clock + dt) % period;

@@ -9,6 +9,7 @@
 export function createCollision(model, colliders) {
   const roadHalf = model.ROAD_HW;
   const buildings = colliders.buildings;
+  const obstacles = colliders.obstacles || []; // knockable street furniture (poles, bollards)
 
   function isRoad(x, z) {
     return Math.abs(x) <= roadHalf || Math.abs(z) <= roadHalf;
@@ -16,7 +17,15 @@ export function createCollision(model, colliders) {
 
   // mutates pos and vel; returns feedback flags
   function resolve(pos, radius, vel) {
-    let onCurb = false, hitHard = false;
+    let onCurb = false, hitHard = false, knocked = false;
+
+    // knockable furniture: drive it down (once) and let the car through
+    for (const o of obstacles) {
+      if (o.knocked) continue;
+      const dx = pos.x - o.x, dz = pos.z - o.z;
+      const rr = radius + o.r;
+      if (dx * dx + dz * dz < rr * rr) { o.knocked = true; o.knock(); knocked = true; }
+    }
 
     // curb: both axes past the road cross → on a corner sidewalk. It's
     // mountable (no push-back here) — the driving code adds the jolt/scrub and
@@ -49,7 +58,7 @@ export function createCollision(model, colliders) {
       if (vn < 0) { vel.x -= vn * nx; vel.z -= vn * nz; }
     }
 
-    return { onCurb, hitHard };
+    return { onCurb, hitHard, knocked };
   }
 
   return { resolve, isRoad };
