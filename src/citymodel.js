@@ -13,22 +13,29 @@ const CURB_Y = 0.18;      // curb / sidewalk height
 const BLOCK_OUT = 52;     // block outer extent from centre
 const ROAD_LEN = 62;      // how far the streets run out of the slice
 
-const KINDS = ['glass', 'ribbon', 'residential', 'glass'];
-
 export function createSliceModel() {
   const inner = ROAD_HW + SIDEWALK;   // 11.5 — building footprint starts here
   const outer = BLOCK_OUT - 2;        // small margin on the far sides
 
-  // four corner blocks, one per quadrant
+  // four corner blocks, one per quadrant — each with its own character
   const quads = [[1, 1], [1, -1], [-1, 1], [-1, -1]];
-  const buildings = quads.map(([sx, sz], i) => ({
-    minX: sx > 0 ? inner : -outer,
-    maxX: sx > 0 ? outer : -inner,
-    minZ: sz > 0 ? inner : -outer,
-    maxZ: sz > 0 ? outer : -inner,
-    height: 22 + ((i * 7) % 4) * 7 + (i === 0 ? 20 : 0), // one taller signature tower
-    kind: KINDS[i],
-  }));
+  const specs = [
+    { kind: 'glass', height: 58, inset: 0 },        // NE — signature tower
+    { kind: 'ribbon', height: 31, inset: 3 },       // SE — mid-rise, set back
+    { kind: 'residential', height: 39, inset: 2 },  // NW
+    { kind: 'glass', height: 25, inset: 5 },        // SW — low, open forecourt
+  ];
+  const buildings = quads.map(([sx, sz], i) => {
+    const s = specs[i];
+    const inIn = inner + s.inset, inOut = outer - s.inset * 0.5;
+    return {
+      minX: sx > 0 ? inIn : -inOut,
+      maxX: sx > 0 ? inOut : -inIn,
+      minZ: sz > 0 ? inIn : -inOut,
+      maxZ: sz > 0 ? inOut : -inIn,
+      height: s.height, kind: s.kind, quad: [sx, sz],
+    };
+  });
 
   // raised sidewalk slabs fill the whole corner between the road cross and the
   // block edge; the building sits on top with a sidewalk margin around it

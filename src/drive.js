@@ -92,6 +92,7 @@ export function createDrive(curve, length, opts = {}) {
   let sEst = 0;
   let playing = false;
   let wallBuzz = 0;
+  let onCurbPrev = false; // was the car on a sidewalk last frame (world mode)
 
   // free-roam (open world) mode: no spline, drive anywhere and collide with the
   // static world. Controllable from the first frame (no attract takeover).
@@ -145,7 +146,7 @@ export function createDrive(curve, length, opts = {}) {
       if (inp.reset) {
         if (world) {
           pos.set(world.spawn.pos[0], 0, world.spawn.pos[2]);
-          yaw = world.spawn.yaw; yawVel = 0;
+          yaw = world.spawn.yaw; yawVel = 0; onCurbPrev = false;
           heading.set(Math.sin(yaw), 0, Math.cos(yaw));
           vel.copy(heading).multiplyScalar(2);
         } else {
@@ -203,12 +204,16 @@ export function createDrive(curve, length, opts = {}) {
       pos.addScaledVector(vel, dt);
 
       if (world) {
-        // free roam: collide against buildings (hard) and curbs (soft)
+        // free roam: buildings hard-stop; curbs are mountable — bump up onto
+        // the sidewalk with a jolt, drive it slower, and hop back down
         const fb = world.collision.resolve(pos, 1.5, vel);
         if (fb.onCurb) {
-          vel.multiplyScalar(Math.max(0, 1 - 2.2 * dt)); // sidewalk scrub
-          if (wallBuzz <= 0 && speed > 6) { rumble(0.4, 0.5, 90); wallBuzz = 0.3; }
+          if (!onCurbPrev && speed > 4) { vel.multiplyScalar(0.8); rumble(0.6, 0.5, 120); } // mount jolt
+          vel.multiplyScalar(Math.max(0, 1 - 0.9 * dt)); // sidewalks are slower going
         }
+        onCurbPrev = fb.onCurb;
+        const targetY = fb.onCurb ? (world.curbY || 0) : 0;
+        pos.y += (targetY - pos.y) * Math.min(1, 9 * dt); // ride up/down the curb
         if (fb.hitHard && wallBuzz <= 0 && speed > 5) { rumble(0.8, 0.5, 150); wallBuzz = 0.35; }
       } else {
         // stay inside the fenced corridor

@@ -86,7 +86,7 @@ if (WORLD) {
   const worldObj = buildWorld(scene, model);
   signals = createSignals(scene, model);
   const collision = createCollision(model, worldObj.colliders);
-  drive = createDrive(null, 0, { world: { spawn: model.spawn, collision } });
+  drive = createDrive(null, 0, { world: { spawn: model.spawn, collision, curbY: model.CURB_Y } });
   scene.fog.near = 72; scene.fog.far = 240; // pull the horizon in for the slice
   const mm = document.getElementById('minimap'); if (mm) mm.style.display = 'none';
 } else {

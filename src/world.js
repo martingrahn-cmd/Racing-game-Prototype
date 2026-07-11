@@ -116,24 +116,58 @@ export function buildWorld(scene, model) {
   };
   const roofTex = makeRoofTexture();
   const roofMat = new THREE.MeshStandardMaterial({ map: roofTex, roughness: 0.9, metalness: 0 });
-  for (const b of model.buildings) {
+  const awnings = [0x8a3f39, 0x3d5c48, 0x41546e, 0x7a6a4a];
+  const tints = [0xffffff, 0xf1ece2, 0xe6eef5, 0xfff2e6];
+  const doorMat = new THREE.MeshStandardMaterial({ color: 0x14181c, roughness: 0.25, metalness: 0.4 });
+  const mastMat = new THREE.MeshStandardMaterial({ color: 0x33373d, roughness: 0.6, metalness: 0.7 });
+  model.buildings.forEach((b, i) => {
     const w = b.maxX - b.minX, d = b.maxZ - b.minZ, h = b.height;
+    const cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2;
     const f = facades[b.kind];
     const tex = (t) => { const c = t.clone(); c.wrapS = c.wrapT = THREE.RepeatWrapping; c.needsUpdate = true; c.repeat.set(Math.max(1, Math.round(w / 12)), Math.max(2, Math.round(h / 5))); return c; };
     const mat = new THREE.MeshStandardMaterial({
       map: tex(f.map), normalMap: tex(f.normalMap), roughnessMap: tex(f.roughnessMap),
       emissive: 0xffffff, emissiveMap: tex(f.emissiveMap), emissiveIntensity: 0,
-      roughness: 1, metalness: 0,
+      color: tints[i % tints.length], roughness: 1, metalness: 0,
     });
     registerEmissive(mat, 0, 1.25); // windows dark by day, lit at night
-    const box = new THREE.Mesh(
-      new THREE.BoxGeometry(w, h, d),
-      [mat, mat, roofMat, roofMat, mat, mat],
-    );
-    box.position.set((b.minX + b.maxX) / 2, CURB_Y + h / 2, (b.minZ + b.maxZ) / 2);
+    const box = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), [mat, mat, roofMat, roofMat, mat, mat]);
+    box.position.set(cx, CURB_Y + h / 2, cz);
     box.castShadow = true; box.receiveShadow = true;
     group.add(box);
-  }
+
+    // rooftop mechanical penthouse for a varied skyline
+    const ph = new THREE.Mesh(new THREE.BoxGeometry(w * 0.45, 3.2, d * 0.45), roofMat);
+    ph.position.set(cx, CURB_Y + h + 1.6, cz);
+    ph.castShadow = true; group.add(ph);
+    // aviation beacon + mast on the signature tower
+    if (h > 50) {
+      const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.18, 12, 6), mastMat);
+      mast.position.set(cx, CURB_Y + h + 3.2 + 6, cz); group.add(mast);
+      const beaconMat = new THREE.MeshStandardMaterial({ color: 0x2a0000, emissive: 0xff2200, emissiveIntensity: 1.2 });
+      registerEmissive(beaconMat, 1.2, 3.4);
+      const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.35, 10, 8), beaconMat);
+      beacon.position.set(cx, CURB_Y + h + 3.2 + 12, cz); group.add(beacon);
+    }
+
+    // street entrance on the face toward the intersection
+    const [sx] = b.quad;
+    const innerX = sx > 0 ? b.minX : b.maxX;
+    const nx = -sx; // face normal pointing toward the intersection
+    const canopy = new THREE.Mesh(
+      new THREE.BoxGeometry(2.8, 0.35, 7),
+      new THREE.MeshStandardMaterial({ color: awnings[i % awnings.length], roughness: 0.85 }),
+    );
+    canopy.position.set(innerX + nx * 1.3, 3.8, cz);
+    canopy.castShadow = true; group.add(canopy);
+    const door = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 3.5), doorMat);
+    door.position.set(innerX + nx * 0.06, CURB_Y + 1.85, cz);
+    door.rotation.y = nx > 0 ? Math.PI / 2 : -Math.PI / 2;
+    group.add(door);
+    const steps = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.14, 6), curbSide);
+    steps.position.set(innerX + nx * 0.95, CURB_Y + 0.07, cz);
+    group.add(steps);
+  });
 
   // -------------------------------------------------- distant filler
   const fillerMat = new THREE.MeshStandardMaterial({ color: 0x2b313b, roughness: 1, metalness: 0 });
