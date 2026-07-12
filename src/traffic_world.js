@@ -14,6 +14,8 @@ import { makeGLTFLoader, rigWheels } from './car.js';
 const CRUISE = 11;          // m/s ≈ 40 km/h
 const ACCEL = 7, DECEL = 20;
 const CAR_LEN = 4.3;
+const DAY_CARS = 26;        // rendered cars at full daylight
+const NIGHT_CARS = 10;      // rendered cars at night
 const MODELS = [
   'assets/traffic/taxi.glb', 'assets/traffic/sedan1.glb', 'assets/traffic/sedan2.glb',
   'assets/traffic/suv.glb', 'assets/traffic/sports1.glb', 'assets/traffic/sports2.glb',
@@ -44,7 +46,7 @@ function makePlaceholder(color) {
   return { group: g, tailMat };
 }
 
-export function createWorldTraffic(scene, model, signals, count = 14) {
+export function createWorldTraffic(scene, model, signals, count = DAY_CARS) {
   const group = new THREE.Group();
   scene.add(group);
   const { nodes, BLOCKS, PITCH, LANE, ROAD_HW } = model;
@@ -71,7 +73,7 @@ export function createWorldTraffic(scene, model, signals, count = 14) {
     cars.push({
       ni, nj, dir, t: Math.random() * 0.8, speed: CRUISE, yaw: 0,
       group: container, placeholder: ph.group, tailMat: ph.tailMat,
-      mi: k % MODELS.length, applied: false, rig: null,
+      mi: k % MODELS.length, applied: false, rig: null, d2: 0,
     });
   }
 
@@ -184,6 +186,7 @@ export function createWorldTraffic(scene, model, signals, count = 14) {
         }
 
         car.group.position.set(cxp, 0, czp);
+        if (playerPos) { const ex = cxp - playerPos.x, ez = czp - playerPos.z; car.d2 = ex * ex + ez * ez; }
         const targetYaw = Math.atan2(car.dir[0], car.dir[1]);
         let dy = targetYaw - car.yaw;
         while (dy > Math.PI) dy -= Math.PI * 2;
@@ -196,6 +199,17 @@ export function createWorldTraffic(scene, model, signals, count = 14) {
           const spin = car.speed * dt / car.rig.radius * car.rig.forwardSign;
           for (const w of car.rig.spinNodes) w.rotation.x += spin;
         }
+      }
+
+      // day/night traffic density: busy at midday, quiet after dark. Cars keep
+      // driving (cheap) but only the nearest `active` render, so cars pop in/out
+      // far from the player rather than in view.
+      const active = Math.round(NIGHT_CARS + (DAY_CARS - NIGHT_CARS) * getDayness());
+      if (active >= cars.length || !playerPos) {
+        for (const car of cars) car.group.visible = true;
+      } else {
+        const order = cars.slice().sort((a, b) => a.d2 - b.d2);
+        for (let i = 0; i < order.length; i++) order[i].group.visible = i < active;
       }
     },
   };
