@@ -94,7 +94,7 @@ if (WORLD) {
   const worldObj = buildWorld(scene, model);
   signals = createSignals(scene, model);
   worldTraffic = createWorldTraffic(scene, model, signals);
-  pedestrians = createPedestrians(scene, model);
+  pedestrians = createPedestrians(scene, model, signals);
   const collision = createCollision(model, {
     buildings: worldObj.colliders.buildings,
     obstacles: [...worldObj.obstacles, ...signals.obstacles],

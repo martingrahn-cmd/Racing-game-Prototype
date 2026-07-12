@@ -43,7 +43,7 @@ export function createCityModel() {
       const z0 = nodes[bj] + ROAD_HW, z1 = nodes[bj + 1] - ROAD_HW;
       const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
       const slab = { minX: x0, maxX: x1, minZ: z0, maxZ: z1 };
-      if (bi === mid && bj === mid) { plaza = { ...slab, cx, cz }; continue; }
+      if (bi === mid && bj === mid) { plaza = { ...slab, cx, cz, bi, bj }; continue; }
       const kind = KINDS[(bi * 3 + bj) % KINDS.length];
       // deterministic height variety, with the occasional signature tower
       const r = (bi * 7 + bj * 13) % 5;
@@ -52,7 +52,7 @@ export function createCityModel() {
       buildings.push({
         minX: x0 + SIDEWALK, maxX: x1 - SIDEWALK,
         minZ: z0 + SIDEWALK, maxZ: z1 - SIDEWALK,
-        slab, height, kind, cx, cz,
+        slab, height, kind, cx, cz, bi, bj,
       });
     }
   }
