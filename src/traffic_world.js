@@ -21,6 +21,14 @@ const MODELS = [
   'assets/traffic/suv.glb', 'assets/traffic/sports1.glb', 'assets/traffic/sports2.glb',
   'assets/traffic/cop.glb',
 ];
+// bigger vehicles (Poly Pizza CC0/CC-BY) for traffic variety — kept at their own
+// lengths so a bus reads as a bus. mi = 100 + index marks a car as one of these.
+const BIG = [
+  { path: 'assets/poly/van.glb', len: 5.0 },
+  { path: 'assets/poly/truck.glb', len: 6.6 },
+  { path: 'assets/poly/bus.glb', len: 11.0 },
+  { path: 'assets/poly/pickup.glb', len: 5.2 },
+];
 const PALETTE = [0xb63a34, 0x2f6fb0, 0xd7d7cf, 0x353b42, 0xd7a12b, 0x2f8f6f, 0x8a8f96, 0x6a4a8f];
 const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 // realistic per-car paint colours (the body material is the colour-named one)
@@ -28,53 +36,6 @@ const CAR_PAINTS = [0xdedede, 0x9aa0a6, 0x24272c, 0xb63a34, 0x2f5aa0, 0x1b3450, 
 // the body panel is the ONE colour-named material on each model (Blue/White/…);
 // everything else (Windows, Black, Grey, Headlights, TailLights) is trim we keep.
 const BODY_NAMES = new Set(['blue', 'lightblue', 'white', 'orange', 'darkorange', 'yellow', 'red', 'green']);
-
-// ---- procedural larger vehicles (van, box truck) for traffic variety ----
-// These aren't swapped for a GLB; they stay as-is so the mix isn't all cars.
-function spinWheels(positions, r, w) {
-  const geo = new THREE.CylinderGeometry(r, r, w, 12); geo.rotateZ(Math.PI / 2);
-  const mat = new THREE.MeshStandardMaterial({ color: 0x111316, roughness: 0.8 });
-  const nodes = [];
-  for (const [x, y, z] of positions) { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = true; nodes.push(m); }
-  return nodes;
-}
-function vehicleLights() {
-  return {
-    tail: new THREE.MeshStandardMaterial({ color: 0x330000, emissive: 0xff2200, emissiveIntensity: 0.35 }),
-    head: new THREE.MeshStandardMaterial({ color: 0x222018, emissive: 0xfff2cc, emissiveIntensity: 0 }),
-  };
-}
-function makeVan(paint) {
-  const g = new THREE.Group();
-  const body = new THREE.MeshStandardMaterial({ color: paint, roughness: 0.5, metalness: 0.3 });
-  const b = new THREE.Mesh(new THREE.BoxGeometry(2.0, 1.7, 4.6), body); b.position.set(0, 1.15, -0.2); b.castShadow = true; g.add(b);
-  const cab = new THREE.Mesh(new THREE.BoxGeometry(1.95, 1.0, 1.4), body); cab.position.set(0, 1.0, 2.0); cab.castShadow = true; g.add(cab);
-  const ws = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.7, 0.1), new THREE.MeshStandardMaterial({ color: 0x11161b, roughness: 0.1, metalness: 0.5 }));
-  ws.position.set(0, 1.25, 2.72); g.add(ws);
-  const { tail, head } = vehicleLights();
-  for (const s of [-0.7, 0.7]) {
-    const t = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.25, 0.06), tail); t.position.set(s, 1.0, -2.52); g.add(t);
-    const h = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.2, 0.06), head); h.position.set(s, 0.75, 2.72); g.add(h);
-  }
-  for (const m of spinWheels([[-0.95, 0.42, 1.5], [0.95, 0.42, 1.5], [-0.95, 0.42, -1.6], [0.95, 0.42, -1.6]], 0.42, 0.3)) g.add(m);
-  return { group: g, tailMat: tail, headMat: head, rig: { spinNodes: g.children.filter((c) => c.geometry && c.geometry.type === 'CylinderGeometry'), radius: 0.42, forwardSign: 1 } };
-}
-function makeTruck(paint) {
-  const g = new THREE.Group();
-  const cabMat = new THREE.MeshStandardMaterial({ color: paint, roughness: 0.5, metalness: 0.3 });
-  const boxMat = new THREE.MeshStandardMaterial({ color: 0xdad7cf, roughness: 0.7, metalness: 0.1 });
-  const cab = new THREE.Mesh(new THREE.BoxGeometry(2.1, 1.7, 1.8), cabMat); cab.position.set(0, 1.15, 2.2); cab.castShadow = true; g.add(cab);
-  const cargo = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2.3, 4.2), boxMat); cargo.position.set(0, 1.6, -1.1); cargo.castShadow = true; g.add(cargo);
-  const ws = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.6, 0.1), new THREE.MeshStandardMaterial({ color: 0x11161b, roughness: 0.1, metalness: 0.5 }));
-  ws.position.set(0, 1.5, 3.11); g.add(ws);
-  const { tail, head } = vehicleLights();
-  for (const s of [-0.8, 0.8]) {
-    const t = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.06), tail); t.position.set(s, 1.0, -3.22); g.add(t);
-    const h = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.22, 0.06), head); h.position.set(s, 0.8, 3.11); g.add(h);
-  }
-  for (const m of spinWheels([[-1.0, 0.5, 2.0], [1.0, 0.5, 2.0], [-1.0, 0.5, -1.2], [1.0, 0.5, -1.2], [-1.0, 0.5, -2.4], [1.0, 0.5, -2.4]], 0.5, 0.34)) g.add(m);
-  return { group: g, tailMat: tail, headMat: head, rig: { spinNodes: g.children.filter((c) => c.geometry && c.geometry.type === 'CylinderGeometry'), radius: 0.5, forwardSign: 1 } };
-}
 
 // procedural box car — instant placeholder before the GLB streams in
 function makePlaceholder(color) {
@@ -115,26 +76,15 @@ export function createWorldTraffic(scene, model, signals, count = DAY_CARS) {
     const dir = pickDir(ni, nj, [0, 0]);
     const container = new THREE.Group();
     group.add(container);
-    // sprinkle procedural vans/trucks into the mix (mi = -1 → never GLB-swapped)
-    const proc = k % 8 === 3 ? 'van' : k % 8 === 7 ? 'truck' : null;
-    if (proc) {
-      const paint = CAR_PAINTS[Math.floor(Math.random() * CAR_PAINTS.length)];
-      const v = proc === 'van' ? makeVan(paint) : makeTruck(paint);
-      container.add(v.group);
-      cars.push({
-        ni, nj, dir, t: Math.random() * 0.8, speed: CRUISE, yaw: 0,
-        group: container, placeholder: null, tailMat: v.tailMat, headMat: v.headMat,
-        mi: -1, applied: true, rig: v.rig, d2: 0,
-      });
-    } else {
-      const ph = makePlaceholder(PALETTE[k % PALETTE.length]);
-      container.add(ph.group);
-      cars.push({
-        ni, nj, dir, t: Math.random() * 0.8, speed: CRUISE, yaw: 0,
-        group: container, placeholder: ph.group, tailMat: ph.tailMat,
-        mi: k % MODELS.length, applied: false, rig: null, d2: 0,
-      });
-    }
+    // every 6th vehicle is a big one (van/truck/bus/pickup), cycling through BIG
+    const big = k % 6 === 4 ? Math.floor(k / 6) % BIG.length : -1;
+    const ph = makePlaceholder(big >= 0 ? 0xcccccc : PALETTE[k % PALETTE.length]);
+    container.add(ph.group);
+    cars.push({
+      ni, nj, dir, t: Math.random() * 0.8, speed: CRUISE, yaw: 0,
+      group: container, placeholder: ph.group, tailMat: ph.tailMat,
+      mi: big >= 0 ? 100 + big : k % MODELS.length, applied: false, rig: null, d2: 0,
+    });
   }
 
   // stream the GLB models and upgrade each car when its model arrives
@@ -144,20 +94,42 @@ export function createWorldTraffic(scene, model, signals, count = DAY_CARS) {
     loader.load(path, (gltf) => {
       for (const car of cars) {
         if (car.mi !== mi || car.applied) continue;
-        applyModel(car, gltf);
+        applyModel(car, gltf, {});
+      }
+    }, undefined, () => { /* keep the placeholder on load error */ });
+  });
+  BIG.forEach((cfg, bi) => {
+    loader.load(cfg.path, (gltf) => {
+      for (const car of cars) {
+        if (car.mi !== 100 + bi || car.applied) continue;
+        applyModel(car, gltf, { len: cfg.len, big: true });
       }
     }, undefined, () => { /* keep the placeholder on load error */ });
   });
 
-  function applyModel(car, gltf) {
+  function applyModel(car, gltf, opts) {
+    const targetLen = opts.len || CAR_LEN;
     const mdl = gltf.scene.clone(true);
     const rig = rigWheels(mdl);
-    mdl.rotation.y = rig.forwardSign < 0 ? Math.PI : 0;
+    let flip = rig.forwardSign < 0;
+    if (opts.big) {
+      // no reliably-named wheels: orient by where the brake lights sit (→ rear)
+      mdl.updateMatrixWorld(true);
+      const bb = new THREE.Box3(), cen = new THREE.Vector3();
+      let zsum = 0, zc = 0;
+      mdl.traverse((o) => {
+        if (!o.isMesh) return;
+        const ms = Array.isArray(o.material) ? o.material : [o.material];
+        if (ms.some((m) => m && /brake|tail/i.test(m.name || ''))) { bb.setFromObject(o); zsum += bb.getCenter(cen).z; zc++; }
+      });
+      if (zc) flip = zsum / zc > 0;
+    }
+    mdl.rotation.y = flip ? Math.PI : 0;
     const holder = new THREE.Group();
     holder.add(mdl);
     const b1 = new THREE.Box3().setFromObject(holder);
     const size = b1.getSize(V);
-    const scale = CAR_LEN / Math.max(size.x, size.z);
+    const scale = targetLen / Math.max(size.x, size.z);
     holder.scale.setScalar(scale);
     const b2 = new THREE.Box3().setFromObject(holder);
     const c = b2.getCenter(V);
@@ -170,7 +142,8 @@ export function createWorldTraffic(scene, model, signals, count = DAY_CARS) {
     // and clone their built-in light materials so we can glow them at night / on
     // braking without every car of the same model lighting up together.
     const paint = CAR_PAINTS[Math.floor(Math.random() * CAR_PAINTS.length)];
-    const liveried = car.mi === 0 || car.mi === MODELS.length - 1; // taxi, cop
+    // big vehicles keep their own texture/livery; only cars get repainted (taxi/cop excepted)
+    const liveried = opts.big || car.mi === 0 || car.mi === MODELS.length - 1;
     holder.traverse((o) => {
       if (!o.isMesh) return;
       o.castShadow = true;
@@ -178,7 +151,7 @@ export function createWorldTraffic(scene, model, signals, count = DAY_CARS) {
       const out = mats.map((m) => {
         if (!m || !m.isMeshStandardMaterial) return m;
         const name = m.name || '';
-        if (/tail/i.test(name)) {
+        if (/tail|brake/i.test(name)) {
           const t = m.clone(); t.emissive = new THREE.Color(0xff2200); t.emissiveIntensity = 0.35;
           car.tailMat = t; return t;
         }
@@ -196,7 +169,9 @@ export function createWorldTraffic(scene, model, signals, count = DAY_CARS) {
     });
     car.group.remove(car.placeholder);
     car.group.add(holder);
-    car.rig = { spinNodes: rig.spinNodes, radius: rig.radius * scale, forwardSign: rig.forwardSign };
+    car.rig = (rig.spinNodes && rig.spinNodes.length)
+      ? { spinNodes: rig.spinNodes, radius: rig.radius * scale, forwardSign: rig.forwardSign }
+      : null;
     car.applied = true;
   }
 

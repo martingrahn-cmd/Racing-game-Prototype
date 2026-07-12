@@ -24,3 +24,20 @@ Filer: `taxi.glb`, `cop.glb`, `suv.glb`, `sedan1.glb`, `sedan2.glb`, `sports1.gl
 
 Publiken i spelet består av dessa karaktärer instansierade i bakade animationsposer
 (vinkande/stående), plus ett antal fullt skelettanimerade exemplar i främsta ledet.
+
+## Gatuprylar & extra fordon (`poly/`)
+
+Hämtade via [Poly Pizza](https://poly.pizza). CC0-modeller är fria; CC-BY kräver kredit (ges nedan).
+
+| Fil | Modell | Upphov | Licens | Källa |
+|---|---|---|---|---|
+| `poly/truck.glb` | Truck | Quaternius | CC0 1.0 | https://poly.pizza/m/cXw6oiFtZ8 |
+| `poly/pickup.glb` | Pickup Truck | Quaternius | CC0 1.0 | https://poly.pizza/m/qn4grQgHm8 |
+| `poly/van.glb` | Van | Poly by Google | CC-BY 3.0 | https://poly.pizza/m/aT_24cDaW1a |
+| `poly/bus.glb` | Bus | jeremy | CC-BY 3.0 | https://poly.pizza/m/bsvS0E1eo4R |
+| `poly/hydrant.glb` | Fire Hydrant | Kay Lousberg | CC0 1.0 | https://poly.pizza/m/thffn9bO75 |
+| `poly/trash_s.glb` | Trashcan Small | Quaternius | CC0 1.0 | https://poly.pizza/m/i7HDuYDLkx |
+| `poly/trash_l.glb` | Trashcan Large | Quaternius | CC0 1.0 | https://poly.pizza/m/eYNKnGlhon |
+| `poly/busstop.glb` | Bus Stop | Zsky | CC-BY 3.0 | https://poly.pizza/m/OWczicNWhO |
+| `poly/tree.glb` | Tree | Marc Solà | CC-BY 3.0 | https://poly.pizza/m/6Yjt8nIwLsD |
+| `poly/bench.glb` | Bench | Poly by Google | CC-BY 3.0 | https://poly.pizza/m/2EvQDFgG1H3 |
