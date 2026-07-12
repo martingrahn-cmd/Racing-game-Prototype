@@ -316,52 +316,61 @@ function buildStreetLamps(group, model) {
 // A residential block is ringed with apartment buildings facing the streets.
 // Collect one placement per apartment slot (back to the block edge, front out).
 function collectApartments(b, out) {
-  const W = 11.5;   // apartment footprint width along the street
-  const OFF = 3.6;  // half-depth: sit the back at the block edge
+  const W = 13;     // apartment footprint width along the street
+  const OFF = 4.5;  // half-depth: sit the back at the block edge (matches DEPTH=8)
   const edges = [
     { horiz: true, fix: b.minZ + OFF, a: b.minX, len: b.maxX - b.minX, yaw: Math.PI },      // south → face -z
     { horiz: true, fix: b.maxZ - OFF, a: b.minX, len: b.maxX - b.minX, yaw: 0 },            // north → face +z
     { horiz: false, fix: b.minX + OFF, a: b.minZ, len: b.maxZ - b.minZ, yaw: -Math.PI / 2 }, // west  → face -x
     { horiz: false, fix: b.maxX - OFF, a: b.minZ, len: b.maxZ - b.minZ, yaw: Math.PI / 2 },  // east  → face +x
   ];
+  let seed = (b.bi * 23 + b.bj * 41) & 255;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
   for (const e of edges) {
     const usable = e.len - 2 * OFF;                 // leave the corners for the perpendicular rows
-    const n = Math.max(1, Math.round(usable / W));
+    const n = Math.max(2, Math.round(usable / W));
     for (let i = 0; i < n; i++) {
       const along = e.a + OFF + usable * ((i + 0.5) / n);
-      out.push({ x: e.horiz ? along : e.fix, z: e.horiz ? e.fix : along, yaw: e.yaw });
+      out.push({ x: e.horiz ? along : e.fix, z: e.horiz ? e.fix : along, yaw: e.yaw, m: Math.floor(rnd() * APT_MODELS.length) });
     }
   }
 }
 
-// Normalise a building GLB (scale so its footprint width is `targetW`, feet at 0,
-// centred) and instance it at every placement. One InstancedMesh per source mesh.
+// Instance the apartment models at every placement. Each model is normalised by
+// DEPTH (its back-to-front size) so the street setback is the same whatever the
+// model, then grouped by material into InstancedMeshes. Windows glow at night.
+const APT_MODELS = ['assets/poly/apt_b.glb', 'assets/poly/apt_a.glb'];
 function buildApartments(group, spots, CURB_Y) {
   if (!spots.length) return;
   const loader = makeGLTFLoader();
-  loader.load('assets/poly/apt1.glb', (gltf) => {
-    gltf.scene.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(gltf.scene);
-    const size = box.getSize(new THREE.Vector3());
-    const s = 11.5 / Math.max(size.x, size.z);
-    const N = new THREE.Matrix4().makeScale(s, s, s)
-      .multiply(new THREE.Matrix4().makeTranslation(-(box.min.x + box.max.x) / 2, -box.min.y, -(box.min.z + box.max.z) / 2));
-    const parts = [];
-    gltf.scene.traverse((o) => { if (o.isMesh) { const g = o.geometry.clone(); g.applyMatrix4(o.matrixWorld); g.applyMatrix4(N); parts.push({ geometry: g, material: o.material }); } });
-    for (const part of parts) {
-      litWindows(part.material);
-      const im = new THREE.InstancedMesh(part.geometry, part.material, spots.length);
-      im.castShadow = true; im.receiveShadow = true;
-      const M = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
-      for (let i = 0; i < spots.length; i++) { q.setFromAxisAngle(up, spots[i].yaw); p.set(spots[i].x, CURB_Y, spots[i].z); M.compose(p, q, one); im.setMatrixAt(i, M); }
-      group.add(im);
-    }
-  }, undefined, () => { /* keep the block empty if the model fails to load */ });
+  APT_MODELS.forEach((path, mi) => {
+    const list = spots.filter((s) => s.m === mi);
+    if (!list.length) return;
+    loader.load(path, (gltf) => {
+      gltf.scene.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(gltf.scene);
+      const size = box.getSize(new THREE.Vector3());
+      const s = 8 / (size.z || 1); // fix the depth so buildings sit flush to the block edge
+      const N = new THREE.Matrix4().makeScale(s, s, s)
+        .multiply(new THREE.Matrix4().makeTranslation(-(box.min.x + box.max.x) / 2, -box.min.y, -(box.min.z + box.max.z) / 2));
+      const parts = [];
+      gltf.scene.traverse((o) => { if (o.isMesh) { const g = o.geometry.clone(); g.applyMatrix4(o.matrixWorld); g.applyMatrix4(N); parts.push({ geometry: g, material: o.material }); } });
+      for (const part of parts) {
+        litWindows(part.material);
+        const im = new THREE.InstancedMesh(part.geometry, part.material, list.length);
+        im.castShadow = true; im.receiveShadow = true;
+        const M = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
+        for (let i = 0; i < list.length; i++) { q.setFromAxisAngle(up, list[i].yaw); p.set(list[i].x, CURB_Y, list[i].z); M.compose(p, q, one); im.setMatrixAt(i, M); }
+        group.add(im);
+      }
+    }, undefined, () => { /* keep the block empty if the model fails to load */ });
+  });
 }
 
 // A villa block: detached houses set back on a garden lot, facing the streets.
-// house2 ("Small Building") reads as a plain box, not a home — use the two houses
-const VILLA_MODELS = ['assets/poly/house1.glb', 'assets/poly/villa1.glb'];
+// house2 ("Small Building") reads as a plain box — use proper houses (incl. a
+// nicer detached house with a driveway)
+const VILLA_MODELS = ['assets/poly/house1.glb', 'assets/poly/villa1.glb', 'assets/poly/villa_c.glb'];
 function collectVillas(b, out) {
   const W = 15;    // house + garden spacing along the street
   const OFF = 6;   // set back from the street edge (front garden)
