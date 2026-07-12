@@ -41,3 +41,19 @@ Hämtade via [Poly Pizza](https://poly.pizza). CC0-modeller är fria; CC-BY krä
 | `poly/busstop.glb` | Bus Stop | Zsky | CC-BY 3.0 | https://poly.pizza/m/OWczicNWhO |
 | `poly/tree.glb` | Tree | Marc Solà | CC-BY 3.0 | https://poly.pizza/m/6Yjt8nIwLsD |
 | `poly/bench.glb` | Bench | Poly by Google | CC-BY 3.0 | https://poly.pizza/m/2EvQDFgG1H3 |
+| `poly/cone.glb` | Traffic Cone | Quaternius | CC0 1.0 | https://poly.pizza/m/aDIrUbMbW3 |
+| `poly/barrier.glb` | Traffic Barrier | Quaternius | CC0 1.0 | https://poly.pizza/m/cM3aJPU9NS |
+| `poly/meter.glb` | Parking Meter | Zsky | CC-BY 3.0 | https://poly.pizza/m/SIePMtqLF8 |
+| `poly/mailbox.glb` | Mailbox | CreativeTrio | CC0 1.0 | https://poly.pizza/m/2olZ0G8iur |
+| `poly/phonebooth.glb` | Phone Booth | Zsky | CC-BY 3.0 | https://poly.pizza/m/nx9Cqdzq97 |
+| `poly/streetsign.glb` | Road Sign Double | J-Toastie | CC-BY 3.0 | https://poly.pizza/m/zjqn0wVnWw |
+| `poly/bicycle.glb` | Bicycle | Poly by Google | CC-BY 3.0 | https://poly.pizza/m/19VoUuA2pcN |
+| `poly/dumpster.glb` | Dumpster | Quaternius | CC0 1.0 | https://poly.pizza/m/PKsbolkZSr |
+| `poly/bush.glb` | Bush | Quaternius | CC0 1.0 | https://poly.pizza/m/ooG6CkLyE8 |
+| `poly/hedge.glb` | Hedge | Quaternius | CC0 1.0 | https://poly.pizza/m/df8uCl1YpK |
+| `poly/picnic.glb` | Picnic Table | J-Toastie | CC-BY 3.0 | https://poly.pizza/m/LM6QWe8kFT |
+| `poly/statue.glb` | Stag Statue | Quaternius | CC0 1.0 | https://poly.pizza/m/cKloIsNcT8 |
+| `poly/flowers.glb` | Flowers | Quaternius | CC0 1.0 | https://poly.pizza/m/NBUxHir6FJ |
+| `poly/tree2.glb` | Tree-2 | Marc Solà | CC-BY 3.0 | https://poly.pizza/m/cRipmFHCEVU |
+| `poly/pine.glb` | Pine | Quaternius | CC0 1.0 | https://poly.pizza/m/igSu0cPoBz |
+| `poly/oak.glb` | Tree | Quaternius | CC0 1.0 | https://poly.pizza/m/qZtx0AHhcy |

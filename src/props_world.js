@@ -1,21 +1,42 @@
-// Street furniture for the open world, built from real CC0/CC-BY GLB props
-// (benches, trash cans, fire hydrants, bus stops, trees) sourced from Poly Pizza
-// — see assets/LICENSES.md. Each prop type is normalised (scaled to a real-world
-// size, feet on the ground) and drawn as InstancedMesh sets (one per material),
-// so the whole city's furniture is only a handful of draw calls no matter how
-// many pieces. Placement is deterministic so the city looks the same each load.
+// Street furniture & greenery for the open world, built from real CC0/CC-BY GLB
+// props sourced from Poly Pizza — see assets/LICENSES.md. Each model is
+// normalised (scaled to a real size, feet on the ground) and drawn as
+// InstancedMesh sets grouped by material, so the whole city's furniture is only
+// a handful of draw calls. Placement is deterministic (seeded) so the city looks
+// the same each load.
 import * as THREE from 'three';
 import { makeGLTFLoader } from './car.js';
 
-// GLB props: target height (m) and a base yaw so the "front" faces +z (toward
-// the street when placed). Tune per model if one faces the wrong way.
+const P = 'assets/poly/';
+// each prop: target height (m) and a base yaw so its "front" faces +z (toward the
+// street when placed). Tune per model if one faces the wrong way.
 const PROPS = {
-  bench:   { file: 'assets/poly/bench.glb',   h: 0.85, yaw: 0 },
-  trash:   { file: 'assets/poly/trash_s.glb', h: 0.95, yaw: 0 },
-  hydrant: { file: 'assets/poly/hydrant.glb', h: 0.85, yaw: 0 },
-  busstop: { file: 'assets/poly/busstop.glb', h: 3.0,  yaw: 0 },
-  tree:    { file: 'assets/poly/tree.glb',    h: 5.0,  yaw: 0 },
+  bench:      { file: P + 'bench.glb',      h: 0.85, yaw: Math.PI }, // #39: seat faces the street
+  trash:      { file: P + 'trash_s.glb',    h: 0.95, yaw: 0 },
+  hydrant:    { file: P + 'hydrant.glb',    h: 0.85, yaw: 0 },
+  bicycle:    { file: P + 'bicycle.glb',    h: 1.1,  yaw: 0 },
+  mailbox:    { file: P + 'mailbox.glb',    h: 1.1,  yaw: 0 },
+  meter:      { file: P + 'meter.glb',      h: 1.35, yaw: 0 },
+  phonebooth: { file: P + 'phonebooth.glb', h: 2.4,  yaw: 0 },
+  streetsign: { file: P + 'streetsign.glb', h: 3.0,  yaw: 0 },
+  bush:       { file: P + 'bush.glb',       h: 1.3,  yaw: 0 },
+  hedge:      { file: P + 'hedge.glb',      h: 1.4,  yaw: 0 },
+  dumpster:   { file: P + 'dumpster.glb',   h: 1.4,  yaw: 0 },
+  cone:       { file: P + 'cone.glb',       h: 0.6,  yaw: 0 },
+  barrier:    { file: P + 'barrier.glb',    h: 0.9,  yaw: 0 },
+  busstop:    { file: P + 'busstop.glb',    h: 3.0,  yaw: 0 },
+  picnic:     { file: P + 'picnic.glb',     h: 0.95, yaw: 0 },
+  statue:     { file: P + 'statue.glb',     h: 4.2,  yaw: 0 },
+  flowers:    { file: P + 'flowers.glb',    h: 0.5,  yaw: 0 },
+  tree:       { file: P + 'tree.glb',       h: 5.2,  yaw: 0 },
+  tree2:      { file: P + 'tree2.glb',      h: 4.6,  yaw: 0 },
+  pine:       { file: P + 'pine.glb',       h: 7.0,  yaw: 0 },
+  oak:        { file: P + 'oak.glb',        h: 6.6,  yaw: 0 },
 };
+const TREE_KINDS = ['tree', 'tree2', 'pine', 'oak'];
+// weighted sidewalk furniture pool (common things repeat)
+const FURNITURE = ['bench', 'bench', 'trash', 'trash', 'hydrant', 'bicycle', 'mailbox',
+  'meter', 'bush', 'bush', 'streetsign', 'phonebooth', 'dumpster', 'cone', 'barrier'];
 
 // merge geometries sharing a material: keep position + normal + uv (zero-fill uv
 // where a sub-mesh has none) so textured props survive instancing.
@@ -25,12 +46,12 @@ function mergeGroup(geos) {
   const pos = new Float32Array(vc * 3), nor = new Float32Array(vc * 3), uv = new Float32Array(vc * 2);
   let o = 0;
   for (const x of g) {
-    const P = x.attributes.position;
+    const A = x.attributes.position;
     let N = x.attributes.normal; if (!N) { x.computeVertexNormals(); N = x.attributes.normal; }
     const U = x.attributes.uv;
-    pos.set(P.array, o * 3); nor.set(N.array, o * 3);
+    pos.set(A.array, o * 3); nor.set(N.array, o * 3);
     if (U) uv.set(U.array, o * 2);
-    o += P.count;
+    o += A.count;
   }
   const out = new THREE.BufferGeometry();
   out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
@@ -67,14 +88,19 @@ export function createProps(scene, model) {
   scene.add(group);
   const { CURB_Y, ROAD_HW, nodes } = model;
 
-  // deterministic RNG so the layout is stable across loads
   let seed = 20240;
   const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  const pick = (arr) => arr[Math.floor(rnd() * arr.length)];
 
-  // ---- placement pass (independent of async GLB loading) ----
-  const spots = { bench: [], trash: [], hydrant: [], busstop: [], tree: [] };
-  const INSET = 1.4, SP = 8;
-  const TYPES = ['bench', 'tree', 'trash', 'tree', 'hydrant', 'bench', 'tree'];
+  const spots = {};                       // prop key -> [{x,z,yaw}]
+  const add = (k, x, z, yaw) => { (spots[k] = spots[k] || []).push({ x, z, yaw }); };
+  const busStops = [];                     // keep trees clear of shelters
+  const treeSpots = [];                    // for dirt rings
+  const near = (list, x, z, r) => list.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < r * r);
+  const addTree = (x, z) => { add(pick(TREE_KINDS), x, z, rnd() * 6.28); treeSpots.push({ x, z }); };
+
+  // ---- sidewalk furniture + bus shelters ----
+  const INSET = 1.4, STOP_INSET = 0.7, SP = 8;
   for (const b of model.buildings) {
     const s = b.slab;
     const edges = [
@@ -85,37 +111,79 @@ export function createProps(scene, model) {
     ];
     for (const e of edges) {
       const yaw = Math.atan2(e.out[0], e.out[1]);
-      const fixed = e.fix - e.out[e.horiz ? 1 : 0] * INSET;
       const len = e.b - e.a;
+      // bus shelter first, sitting nearer the curb (#38), so furniture stays clear
+      let stop = null;
+      if (!e.entrance && rnd() < 0.3) {
+        const along = e.a + len * 0.5;
+        const fx = e.fix - e.out[e.horiz ? 1 : 0] * STOP_INSET;
+        const sx = e.horiz ? along : fx, sz = e.horiz ? fx : along;
+        add('busstop', sx, sz, yaw); busStops.push({ x: sx, z: sz }); stop = { x: sx, z: sz };
+      }
+      const fixed = e.fix - e.out[e.horiz ? 1 : 0] * INSET;
       const n = Math.max(1, Math.floor((len - 6) / SP));
       for (let i = 0; i <= n; i++) {
         const along = e.a + 3 + (len - 6) * (i / n);
         if (e.entrance && Math.abs(along - b.cx) < 4.5) continue;
         const x = e.horiz ? along : fixed, z = e.horiz ? fixed : along;
-        const t = TYPES[Math.floor(rnd() * TYPES.length)];
-        spots[t].push({ x, z, yaw });
-      }
-      if (!e.entrance && rnd() < 0.3) {
-        const along = e.a + len * 0.5;
-        spots.busstop.push({ x: e.horiz ? along : fixed, z: e.horiz ? fixed : along, yaw });
-      }
-    }
-  }
-  // extra street trees at the outer corners of every intersection for a leafy grid
-  for (let i = 0; i < nodes.length; i++) {
-    for (let j = 0; j < nodes.length; j++) {
-      for (const [ox, oz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
-        if (rnd() < 0.5) continue;
-        spots.tree.push({ x: nodes[i] + ox * (ROAD_HW + 2.2), z: nodes[j] + oz * (ROAD_HW + 2.2), yaw: rnd() * 6.28 });
+        if (stop && (x - stop.x) ** 2 + (z - stop.z) ** 2 < 16) continue; // clearance around the shelter
+        add(pick(FURNITURE), x, z, yaw);
       }
     }
   }
 
+  // ---- street trees at intersection corners (halved, varied), clear of shelters ----
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = 0; j < nodes.length; j++) {
+      for (const [ox, oz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+        if (rnd() < 0.75) continue;                   // ~25% of corners → about half the old count
+        const x = nodes[i] + ox * (ROAD_HW + 2.4), z = nodes[j] + oz * (ROAD_HW + 2.4);
+        if (near(busStops, x, z, 5)) continue;
+        addTree(x, z);
+      }
+    }
+  }
+
+  // ---- park props on the central plaza (avoid fountain / gazebo / clock tower) ----
+  if (model.plaza) {
+    const pz = model.plaza, cx = pz.cx, cz = pz.cz;
+    const halfW = (pz.maxX - pz.minX) / 2 - 4, halfD = (pz.maxZ - pz.minZ) / 2 - 4;
+    const blocked = [{ x: cx, z: cz, r: 8 }, { x: cx - 15, z: cz - 13, r: 5 }, { x: cx + 15, z: cz + 14, r: 5 }];
+    const okPark = (x, z) => !blocked.some((o) => (o.x - x) ** 2 + (o.z - z) ** 2 < o.r * o.r);
+    const parkPlace = (k, count, extra) => {
+      let placed = 0, tries = 0;
+      while (placed < count && tries < count * 12) {
+        tries++;
+        const x = cx + (rnd() * 2 - 1) * halfW, z = cz + (rnd() * 2 - 1) * halfD;
+        if (!okPark(x, z)) continue;
+        if (k === 'tree') addTree(x, z); else add(k, x, z, rnd() * 6.28);
+        if (extra) extra(x, z);
+        placed++;
+      }
+    };
+    add('statue', cx + 15, cz - 13, Math.PI);   // a landmark statue opposite the gazebo
+    parkPlace('picnic', 5);
+    parkPlace('flowers', 6);
+    parkPlace('bush', 7);
+    parkPlace('hedge', 3);
+    parkPlace('tree', 8);
+  }
+
+  // ---- dirt ring under every tree ----
+  if (treeSpots.length) {
+    const ringGeo = new THREE.CircleGeometry(1.35, 16); ringGeo.rotateX(-Math.PI / 2);
+    const ringMat = new THREE.MeshStandardMaterial({ color: 0x5a4632, roughness: 1, metalness: 0 });
+    const im = new THREE.InstancedMesh(ringGeo, ringMat, treeSpots.length);
+    const M = new THREE.Matrix4();
+    for (let i = 0; i < treeSpots.length; i++) { M.makeTranslation(treeSpots[i].x, CURB_Y + 0.02, treeSpots[i].z); im.setMatrixAt(i, M); }
+    im.receiveShadow = true; group.add(im);
+  }
+
   // ---- load each prop GLB and build its instanced sets ----
   const loader = makeGLTFLoader();
-  for (const [key, cfg] of Object.entries(PROPS)) {
-    const list = spots[key];
-    if (!list.length) continue;
+  for (const [key, list] of Object.entries(spots)) {
+    if (!list.length || !PROPS[key]) continue;
+    const cfg = PROPS[key];
     loader.load(cfg.file, (gltf) => {
       const parts = prepGLB(gltf, cfg.h, cfg.yaw);
       for (const part of parts) {
