@@ -63,3 +63,6 @@ Hämtade via [Poly Pizza](https://poly.pizza). CC0-modeller är fria; CC-BY krä
 | `poly/house1.glb` | Two story house | Kenney | CC0 1.0 | https://poly.pizza/m/hmXhiLDf8D |
 | `poly/villa1.glb` | Villa | Steren Giannini | CC-BY 3.0 | https://poly.pizza/m/1ogbmmlgzjv |
 | `poly/house2.glb` | Small Building | Kenney | CC0 1.0 | https://poly.pizza/m/Rq572hdKEz |
+| `poly/apt_a.glb` | Big Building | Quaternius | CC0 1.0 | https://poly.pizza/m/AVCS8jUd2l |
+| `poly/apt_b.glb` | Large Building | Kenney | CC0 1.0 | https://poly.pizza/m/h7Jaq7bqMq |
+| `poly/villa_c.glb` | House with driveway | Poly by Google | CC-BY 3.0 | https://poly.pizza/m/bnZkUs4qEdG |
