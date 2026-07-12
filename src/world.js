@@ -301,6 +301,18 @@ function buildPlaza(group, plaza, CURB_Y) {
   const w = plaza.maxX - plaza.minX, d = plaza.maxZ - plaza.minZ;
   const pad = new THREE.Mesh(new THREE.BoxGeometry(w - 3, 0.05, d - 3), grass);
   pad.position.set(cx, CURB_Y + 0.03, cz); pad.receiveShadow = true; group.add(pad);
+  // gentle grass mounds so the lawn isn't dead flat
+  for (const [mx, mz, r, hy] of [[-13, 11, 6, 0.9], [12, 13, 5, 0.7], [14, -12, 5.5, 0.8], [-12, -13, 5, 0.6]]) {
+    const mound = new THREE.Mesh(new THREE.SphereGeometry(r, 16, 10), grass);
+    mound.scale.y = hy / r; mound.position.set(cx + mx, CURB_Y + 0.03, cz + mz);
+    mound.receiveShadow = true; mound.castShadow = true; group.add(mound);
+  }
+  // gravel walking paths (a plus through the park), matching the pedestrian routes
+  const pathMat = new THREE.MeshStandardMaterial({ color: 0xbdb09a, roughness: 1, metalness: 0 });
+  for (const horiz of [true, false]) {
+    const path = new THREE.Mesh(new THREE.BoxGeometry(horiz ? w - 4 : 2.6, 0.06, horiz ? 2.6 : d - 4), pathMat);
+    path.position.set(cx, CURB_Y + 0.06, cz); path.receiveShadow = true; group.add(path);
+  }
   // fountain
   const basin = new THREE.Mesh(new THREE.CylinderGeometry(6, 6.4, 0.9, 28), stone);
   basin.position.set(cx, CURB_Y + 0.45, cz); basin.castShadow = true; group.add(basin);
@@ -310,6 +322,20 @@ function buildPlaza(group, plaza, CURB_Y) {
   water.position.set(cx, CURB_Y + 0.85, cz); group.add(water);
   const jet = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.6, 3.2, 12), stone);
   jet.position.set(cx, CURB_Y + 2.2, cz); group.add(jet);
+  // spraying water: a translucent plume up the jet + a fan of arcing streams that
+  // fall back to the basin, plus scattered droplets (stylised, static)
+  const sprayMat = new THREE.MeshStandardMaterial({ color: 0xbfe4f0, emissive: 0x2a6b82, emissiveIntensity: 0.25, roughness: 0.05, metalness: 0.2, transparent: true, opacity: 0.5 });
+  registerEmissive(sprayMat, 0.25, 0.7);
+  const plume = new THREE.Mesh(new THREE.ConeGeometry(0.9, 2.6, 12, 1, true), sprayMat);
+  plume.position.set(cx, CURB_Y + 5.1, cz); group.add(plume);
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2;
+    const stream = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.09, 3.4, 6), sprayMat);
+    stream.position.set(cx + Math.cos(a) * 2.4, CURB_Y + 4.4, cz + Math.sin(a) * 2.4);
+    stream.rotation.z = Math.cos(a) * 0.5; stream.rotation.x = -Math.sin(a) * 0.5; group.add(stream);
+    const drop = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 6), sprayMat);
+    drop.position.set(cx + Math.cos(a) * 4.6, CURB_Y + 2.4, cz + Math.sin(a) * 4.6); group.add(drop);
+  }
   // statue on a pedestal
   const ped = new THREE.Mesh(new THREE.BoxGeometry(2.4, 2.2, 2.4), stone);
   ped.position.set(cx - 14, CURB_Y + 1.1, cz + 12); ped.castShadow = true; group.add(ped);

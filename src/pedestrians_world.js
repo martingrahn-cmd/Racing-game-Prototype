@@ -113,8 +113,26 @@ function buildSidewalkGraph(model) {
     const dn = nb(b.bi, b.bj + 1);
     if (dn) { add(nid(b.idx, 3), nid(dn.idx, 0), 'ew'); add(nid(b.idx, 2), nid(dn.idx, 1), 'ew'); }
   }
-  const pos = (id) => wb[Math.floor(id / 4)].corners[id % 4];
-  const nodeCount = wb.length * 4;
+  // park paths: a plus of walkways across the central plaza so people stroll
+  // through the park (on paths) instead of only round its perimeter.
+  const extra = [];
+  const base = wb.length * 4;
+  const plazaB = model.plaza ? wb.find((b) => b.bi === model.plaza.bi && b.bj === model.plaza.bj) : null;
+  if (plazaB) {
+    const C = plazaB.corners;
+    const centerId = base + extra.length;
+    extra.push([(C[0][0] + C[2][0]) / 2, (C[0][1] + C[2][1]) / 2]);
+    for (let k = 0; k < 4; k++) {
+      const a = C[k], b = C[(k + 1) % 4];
+      const midId = base + extra.length;
+      extra.push([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]);
+      add(nid(plazaB.idx, k), midId, null); add(midId, nid(plazaB.idx, k), null);
+      add(nid(plazaB.idx, (k + 1) % 4), midId, null); add(midId, nid(plazaB.idx, (k + 1) % 4), null);
+      add(midId, centerId, null); add(centerId, midId, null);
+    }
+  }
+  const pos = (id) => (id >= base ? extra[id - base] : wb[Math.floor(id / 4)].corners[id % 4]);
+  const nodeCount = base + extra.length;
   return { edges, pos, nodeCount };
 }
 
