@@ -28,15 +28,22 @@ const PROPS = {
   picnic:     { file: P + 'picnic.glb',     h: 0.95, yaw: 0 },
   statue:     { file: P + 'statue.glb',     h: 4.2,  yaw: 0 },
   flowers:    { file: P + 'flowers.glb',    h: 0.5,  yaw: 0 },
-  tree:       { file: P + 'tree.glb',       h: 5.2,  yaw: 0 },
-  tree2:      { file: P + 'tree2.glb',      h: 4.6,  yaw: 0 },
-  pine:       { file: P + 'pine.glb',       h: 7.0,  yaw: 0 },
-  oak:        { file: P + 'oak.glb',        h: 6.6,  yaw: 0 },
+  tree:       { file: P + 'tree.glb',       h: 6.0,  yaw: 0 }, // #44: bigger so it reads as a tree
+  tree2:      { file: P + 'tree2.glb',      h: 5.6,  yaw: 0 },
+  pine:       { file: P + 'pine.glb',       h: 7.5,  yaw: 0 },
+  oak:        { file: P + 'oak.glb',        h: 7.0,  yaw: 0 },
 };
 const TREE_KINDS = ['tree', 'tree2', 'pine', 'oak'];
-// weighted sidewalk furniture pool (common things repeat)
-const FURNITURE = ['bench', 'bench', 'trash', 'trash', 'hydrant', 'bicycle', 'mailbox',
-  'meter', 'bush', 'bush', 'streetsign', 'phonebooth', 'dumpster', 'cone', 'barrier'];
+// weighted sidewalk furniture pool (common things repeat). Mailboxes and road
+// signs are held back for now — mailboxes suit a residential district (#45) and
+// signs need real intersection logic (#46) before they belong on a corner.
+const FURNITURE = ['bench', 'bench', 'trash', 'trash', 'hydrant', 'bicycle', 'bicycle',
+  'meter', 'bush', 'bush', 'phonebooth', 'dumpster', 'cone', 'barrier'];
+// props that get a random per-instance colour for variety (#50 bikes, #55 benches)
+const TINT = {
+  bicycle: [0xb63a34, 0x2f6fb0, 0x2f8f6f, 0xd7a12b, 0x24272c, 0xe8e2d4, 0x6a4a8f, 0xc0552f],
+  bench: [0x6a4a2f, 0x3d5c48, 0x41546e, 0x5a5a5a, 0x7a3a30, 0x4a4e54],
+};
 
 // merge geometries sharing a material: keep position + normal + uv (zero-fill uv
 // where a sub-mesh has none) so textured props survive instancing.
@@ -184,6 +191,8 @@ export function createProps(scene, model) {
   for (const [key, list] of Object.entries(spots)) {
     if (!list.length || !PROPS[key]) continue;
     const cfg = PROPS[key];
+    // one random colour per placement (shared across the prop's sub-meshes)
+    const cols = TINT[key] ? list.map(() => new THREE.Color(pick(TINT[key]))) : null;
     loader.load(cfg.file, (gltf) => {
       const parts = prepGLB(gltf, cfg.h, cfg.yaw);
       for (const part of parts) {
@@ -195,7 +204,9 @@ export function createProps(scene, model) {
           p.set(list[i].x, CURB_Y, list[i].z);
           M.compose(p, q, one);
           im.setMatrixAt(i, M);
+          if (cols) im.setColorAt(i, cols[i]);
         }
+        if (im.instanceColor) im.instanceColor.needsUpdate = true;
         group.add(im);
       }
     }, undefined, () => { /* skip a prop that fails to load */ });
