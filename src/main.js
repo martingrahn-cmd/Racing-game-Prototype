@@ -621,6 +621,9 @@ function loop(now) {
     post: postEnabled, d: +daynight.dayness.toFixed(3),
     sun: +sun.intensity.toFixed(2), hemi: +hemi.intensity.toFixed(2),
     tris: renderer.info.render.triangles,
+    cars: worldTraffic ? worldTraffic.cars.length : 0,
+    carsUp: worldTraffic ? worldTraffic.cars.filter((c) => c.applied).length : 0,
+    tailLit: worldTraffic ? worldTraffic.cars.filter((c) => c.tailMat).length : 0,
   };
 }
 requestAnimationFrame(loop);
