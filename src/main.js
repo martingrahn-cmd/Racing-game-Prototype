@@ -89,8 +89,10 @@ const skidmarks = createSkidmarks(scene);
 
 let curve = null, length = 0, cornerSpans = null;
 let extras = null, traffic = null, minimap = null, signals = null, worldTraffic = null, pedestrians = null, drive;
+let worldModel = null, worldAttract = false;
 if (WORLD) {
   const model = createCityModel();
+  worldModel = model; worldAttract = true;
   const worldObj = buildWorld(scene, model);
   signals = createSignals(scene, model);
   worldTraffic = createWorldTraffic(scene, model, signals);
@@ -346,7 +348,62 @@ function modDist(a, b) { // distance from a forward to b along loop
 
 const dirVec = V(), rightVec = V();
 
+// Free-roam attract mode: cinematic shots of the living city until the player
+// grabs the wheel. The car sits parked at the spawn; the camera cranes around
+// the plaza, chases a passing traffic car, then drifts high over the district.
+const WA_SHOT_DUR = 9;
+let waShot = 0, waTimer = WA_SHOT_DUR, waAngle = Math.random() * Math.PI * 2, waCar = null;
+function pickAttractCar() {
+  const cars = worldTraffic && worldTraffic.cars;
+  if (cars && cars.length) waCar = cars[Math.floor(Math.random() * cars.length)];
+}
+function updateWorldAttract(dt, time) {
+  const m = worldModel;
+  const px = m.plaza.cx, pz = m.plaza.cz;
+  // parked player car at the spawn
+  carGround.set(m.spawn.pos[0], 0.035, m.spawn.pos[2]);
+  carP.copy(carGround); carP.y += 0.515;
+  dirVec.set(Math.sin(m.spawn.yaw), 0, Math.cos(m.spawn.yaw));
+  rightVec.set(-dirVec.z, 0, dirVec.x);
+  car.update(carGround, dirVec, 0, 0, 0, dt, false);
+  car.setVisible(true);
+
+  waTimer += dt;
+  if (waTimer > WA_SHOT_DUR) {
+    waTimer = 0; waShot = (waShot + 1) % 3; smoothedPos = null;
+    if (waShot === 1) pickAttractCar();
+  }
+
+  if (waShot === 1 && waCar) { // chase a traffic car through the grid
+    const cp = waCar.group.position, cy = waCar.yaw;
+    const hx = Math.sin(cy), hz = Math.cos(cy);
+    camPos.set(cp.x - hx * 9, 4.2, cp.z - hz * 9);
+    lookP.set(cp.x + hx * 8, 0.9, cp.z + hz * 8);
+  } else if (waShot === 2) { // high, slow drift over the district
+    const a = time * 0.03;
+    camPos.set(px + Math.cos(a) * 135, 118, pz + Math.sin(a) * 135);
+    lookP.set(px, 2, pz);
+  } else { // crane orbit around the plaza
+    waAngle += dt * 0.11;
+    camPos.set(px + Math.cos(waAngle) * 60, 25, pz + Math.sin(waAngle) * 60);
+    lookP.set(px, 6, pz);
+  }
+
+  if (!smoothedPos) { smoothedPos = camPos.clone(); smoothedLook = lookP.clone(); }
+  smoothedPos.lerp(camPos, 1 - Math.pow(0.0009, dt));
+  smoothedLook.lerp(lookP, 1 - Math.pow(0.0006, dt));
+  camera.position.copy(smoothedPos);
+  camera.up.set(0, 1, 0);
+  camera.lookAt(smoothedLook);
+  camera.fov += (60 - camera.fov) * Math.min(1, dt * 3);
+  camera.updateProjectionMatrix();
+  sun.position.copy(smoothedLook).addScaledVector(SUN_DIR, 420);
+  sun.target.position.copy(smoothedLook);
+  return 0;
+}
+
 function updateCamera(dt, time, st) {
+  if (WORLD && !st) return updateWorldAttract(dt, time);
   let kmh, roll, steer, speedMs;
   if (st) {
     // player is driving: anchor everything to the real car state
@@ -547,11 +604,13 @@ function loop(now) {
 
   const st = drive.update(dt, sPos, WORLD ? (worldTraffic && worldTraffic.cars) : traffic.cars);
   if (st) audio.resume(); // gamepad-only players never fire DOM gestures
+  if (WORLD && st && worldAttract) { worldAttract = false; camMode = 0; smoothedPos = null; } // took the wheel
   if (drive.consumeCameraTap()) cycleCamera();
 
-  // attract mode: auto-cycle cameras unless the user recently chose one
+  // attract mode: auto-cycle cameras unless the user recently chose one (race
+  // only — free-roam runs its own cinematic shots in updateWorldAttract)
   autoTimer += dt;
-  if (!st && autoTimer > 11 && perfTime - lastUserSwitch > 26) {
+  if (!st && !WORLD && autoTimer > 11 && perfTime - lastUserSwitch > 26) {
     autoTimer = 0;
     camMode = (camMode + 1) % 4;
     tracksideS = null;
@@ -585,7 +644,7 @@ function loop(now) {
 
   // HUD
   elSpeed.textContent = String(Math.round(st ? kmh : kmh + Math.sin(perfTime * 9) * 1.4));
-  elCam.textContent = CAM_NAMES[camMode];
+  elCam.textContent = (WORLD && worldAttract) ? 'ATTRACT' : CAM_NAMES[camMode];
   const toast = drive.consumePadToast();
   if (toast) { elPrompt.textContent = '🎮 HANDKONTROLL ANSLUTEN'; promptTimer = toast; }
   if (promptTimer > 0) {
