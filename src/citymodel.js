@@ -11,7 +11,7 @@ const LANE = 3.5;         // lane centre offset (right-hand traffic)
 const SIDEWALK = 4.5;     // sidewalk depth between curb and building
 const CURB_Y = 0.18;      // curb / sidewalk height
 const PITCH = 100;        // spacing between intersections
-const BLOCKS = 5;         // blocks per axis (odd → a true centre block for the plaza)
+const BLOCKS = 9;         // blocks per axis (odd → a true centre block for the plaza); ~900 m district
 
 export function createCityModel() {
   const half = BLOCKS / 2;
@@ -47,12 +47,16 @@ export function createCityModel() {
       // out to residential mid-rises and low villas at the edge. `urban` is high
       // near the plaza; deterministic jitter blurs the boundaries so it tones out
       // instead of snapping ring-to-ring.
-      const ring = Math.max(Math.abs(bi - mid), Math.abs(bj - mid)); // 1 (inner) … 2 (edge)
-      const jitter = ((bi * 7 + bj * 13) % 5) / 5;                   // 0 … 0.8
-      const urban = (2 - ring) + jitter - 0.4;
+      // `t` runs 0 (centre) … 1 (edge); deterministic jitter blurs the ring
+      // boundaries so finance → residential → villa tones out over the whole
+      // radius instead of snapping. Scales to any BLOCKS (more rings = smoother).
+      const maxRing = mid || 1;
+      const ring = Math.max(Math.abs(bi - mid), Math.abs(bj - mid));
+      const jitter = ((bi * 7 + bj * 13) % 5) / 5 - 0.5;             // -0.5 … 0.3
+      const t = ring / maxRing + jitter * 0.28;
       let kind, height, category;
-      if (urban > 1.0) { category = 'finance'; kind = 'glass'; height = 58 + (r % 4) * 12 + ((bi + bj) % 3 === 0 ? 24 : 0); }
-      else if (urban > 0.3) { category = 'residential'; kind = r % 2 ? 'ribbon' : 'residential'; height = 28 + (r % 3) * 8; }
+      if (t < 0.34) { category = 'finance'; kind = 'glass'; height = 58 + (r % 4) * 12 + ((bi + bj) % 3 === 0 ? 24 : 0); }
+      else if (t < 0.7) { category = 'residential'; kind = r % 2 ? 'ribbon' : 'residential'; height = 28 + (r % 3) * 8; }
       else { category = 'villa'; kind = 'residential'; height = 11 + (r % 3) * 5; }
       buildings.push({
         minX: x0 + SIDEWALK, maxX: x1 - SIDEWALK,
