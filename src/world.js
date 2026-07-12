@@ -695,6 +695,85 @@ function buildPlaza(group, plaza, CURB_Y) {
   }
   const ctRoof = new THREE.Mesh(new THREE.ConeGeometry(2.2, 2.4, 4), new THREE.MeshStandardMaterial({ color: 0x4a5560, roughness: 0.6, metalness: 0.3 }));
   ctRoof.rotation.y = Math.PI / 4; ctRoof.position.set(ctx, CURB_Y + 14.2, ctz); ctRoof.castShadow = true; group.add(ctRoof);
+
+  // ---- decorative pond in the open mid-quadrant ----
+  const pondX = cx - 23, pondZ = cz + 21;
+  const pondWaterMat = new THREE.MeshStandardMaterial({ color: 0x2c6a86, emissive: 0x0e2a38, emissiveIntensity: 0.18, roughness: 0.12, metalness: 0.35, transparent: true, opacity: 0.9 });
+  registerEmissive(pondWaterMat, 0.18, 0.7);
+  const pondRim = new THREE.Mesh(new THREE.CylinderGeometry(6.6, 6.9, 0.5, 26), stone);
+  pondRim.position.set(pondX, CURB_Y + 0.22, pondZ); pondRim.receiveShadow = true; group.add(pondRim);
+  const pondWater = new THREE.Mesh(new THREE.CylinderGeometry(6.1, 6.1, 0.28, 26), pondWaterMat);
+  pondWater.position.set(pondX, CURB_Y + 0.34, pondZ); pondWater.scale.z = 0.82; group.add(pondWater);
+  const lily = new THREE.MeshStandardMaterial({ color: 0x3f8a45, roughness: 0.9 });
+  const bloom = new THREE.MeshStandardMaterial({ color: 0xe4849e, roughness: 0.85 });
+  for (const [lx, lz] of [[-2.4, 1.1], [1.8, -1.4], [2.6, 1.7], [-0.6, -2.1]]) {
+    const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 0.06, 10), lily);
+    pad.position.set(pondX + lx, CURB_Y + 0.47, pondZ + lz * 0.82); group.add(pad);
+    if ((lx + lz) > 0) { const fl = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 6), bloom); fl.position.set(pondX + lx, CURB_Y + 0.55, pondZ + lz * 0.82); group.add(fl); }
+  }
+  // reeds/cattails clumped at the near edge
+  const reedMat = new THREE.MeshStandardMaterial({ color: 0x6f8f3c, roughness: 0.95 });
+  for (let i = 0; i < 9; i++) {
+    const a = (i / 9) * Math.PI * 2, rr = 5.6 + (i % 3) * 0.3;
+    const reed = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.08, 1.4 + (i % 4) * 0.25, 5), reedMat);
+    reed.position.set(pondX + Math.cos(a) * rr, CURB_Y + 0.9, pondZ + Math.sin(a) * rr * 0.82);
+    reed.rotation.z = Math.cos(a) * 0.12; reed.castShadow = true; group.add(reed);
+  }
+
+  // ---- ornate park lamps along the gravel paths (glow at night) ----
+  const lampPole = new THREE.MeshStandardMaterial({ color: 0x2b3138, roughness: 0.5, metalness: 0.6 });
+  const lampGlass = new THREE.MeshStandardMaterial({ color: 0xfff2c8, emissive: 0xffd873, emissiveIntensity: 0.05, roughness: 0.3, metalness: 0.1, transparent: true, opacity: 0.92 });
+  registerEmissive(lampGlass, 0.05, 2.6);
+  function parkLamp(lx, lz) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.16, 4.2, 8), lampPole);
+    post.position.set(lx, CURB_Y + 2.1, lz); post.castShadow = true; group.add(post);
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.24, 0.35, 8), lampPole);
+    cap.position.set(lx, CURB_Y + 4.5, lz); group.add(cap);
+    const lantern = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.7, 0.5), lampGlass);
+    lantern.position.set(lx, CURB_Y + 4.05, lz); group.add(lantern);
+    const top = new THREE.Mesh(new THREE.ConeGeometry(0.36, 0.4, 8), lampPole);
+    top.position.set(lx, CURB_Y + 4.75, lz); group.add(top);
+  }
+  for (const off of [-27, -13, 13, 27]) { parkLamp(cx + off, cz + 3.2); parkLamp(cx + 3.2, cz + off); }
+
+  // ---- extra benches lining the outer paths (facing the walkway) ----
+  for (const [px, pz, ry] of [
+    [cx - 20, cz - 3.4, 0], [cx + 20, cz - 3.4, 0],
+    [cx - 3.4, cz - 20, Math.PI / 2], [cx - 3.4, cz + 20, Math.PI / 2],
+  ]) {
+    const bench = new THREE.Group();
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.1, 0.5), wood); seat.position.y = 0.46; bench.add(seat);
+    const back = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.5, 0.1), wood); back.position.set(0, 0.73, -0.2); bench.add(back);
+    for (const s of [-0.82, 0.82]) { const lg = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.46, 0.5), metal); lg.position.set(s, 0.23, 0); bench.add(lg); }
+    bench.position.set(px, CURB_Y, pz); bench.rotation.y = ry; bench.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    group.add(bench);
+  }
+
+  // ---- low decorative perimeter railing (gaps at the 4 path entrances) ----
+  const railMat = new THREE.MeshStandardMaterial({ color: 0x30363d, roughness: 0.5, metalness: 0.55 });
+  const railHalf = w / 2 - 1.4, gap = 4.5;
+  function railRun(a0, a1, fixed, horiz) {
+    // posts + top/mid rail along one straight segment
+    const len = a1 - a0; if (len <= 0) return;
+    const n = Math.max(1, Math.round(len / 3.4));
+    for (let i = 0; i <= n; i++) {
+      const a = a0 + (len * i) / n;
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.14, 1.0, 0.14), railMat);
+      post.position.set(horiz ? a : fixed, CURB_Y + 0.5, horiz ? fixed : a); group.add(post);
+    }
+    for (const ry of [0.82, 0.42]) {
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(horiz ? len : 0.08, 0.08, horiz ? 0.08 : len), railMat);
+      rail.position.set(horiz ? (a0 + a1) / 2 : fixed, CURB_Y + ry, horiz ? fixed : (a0 + a1) / 2); group.add(rail);
+    }
+  }
+  for (const side of [-1, 1]) {
+    // top & bottom edges (horizontal runs), split by the central path gap
+    railRun(cx - railHalf, cx - gap, cz + side * railHalf, true);
+    railRun(cx + gap, cx + railHalf, cz + side * railHalf, true);
+    // left & right edges (vertical runs)
+    railRun(cz - railHalf, cz - gap, cx + side * railHalf, false);
+    railRun(cz + gap, cz + railHalf, cx + side * railHalf, false);
+  }
 }
 
 // Minimal geometry merge for flat marking planes (position + uv only).
