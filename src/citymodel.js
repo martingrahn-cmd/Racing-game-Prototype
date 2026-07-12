@@ -13,8 +13,6 @@ const CURB_Y = 0.18;      // curb / sidewalk height
 const PITCH = 100;        // spacing between intersections
 const BLOCKS = 5;         // blocks per axis (odd → a true centre block for the plaza)
 
-const KINDS = ['glass', 'ribbon', 'glass', 'residential', 'glass'];
-
 export function createCityModel() {
   const half = BLOCKS / 2;
   const nodes = [];
@@ -44,15 +42,22 @@ export function createCityModel() {
       const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
       const slab = { minX: x0, maxX: x1, minZ: z0, maxZ: z1 };
       if (bi === mid && bj === mid) { plaza = { ...slab, cx, cz, bi, bj }; continue; }
-      const kind = KINDS[(bi * 3 + bj) % KINDS.length];
-      // deterministic height variety, with the occasional signature tower
       const r = (bi * 7 + bj * 13) % 5;
-      const tall = (bi + bj) % 3 === 0;
-      const height = 26 + r * 8 + (tall ? 34 : 0);
+      // Radial density gradient: expensive finance towers in the centre fade
+      // out to residential mid-rises and low villas at the edge. `urban` is high
+      // near the plaza; deterministic jitter blurs the boundaries so it tones out
+      // instead of snapping ring-to-ring.
+      const ring = Math.max(Math.abs(bi - mid), Math.abs(bj - mid)); // 1 (inner) … 2 (edge)
+      const jitter = ((bi * 7 + bj * 13) % 5) / 5;                   // 0 … 0.8
+      const urban = (2 - ring) + jitter - 0.4;
+      let kind, height, category;
+      if (urban > 1.0) { category = 'finance'; kind = 'glass'; height = 58 + (r % 4) * 12 + ((bi + bj) % 3 === 0 ? 24 : 0); }
+      else if (urban > 0.3) { category = 'residential'; kind = r % 2 ? 'ribbon' : 'residential'; height = 28 + (r % 3) * 8; }
+      else { category = 'villa'; kind = 'residential'; height = 11 + (r % 3) * 5; }
       buildings.push({
         minX: x0 + SIDEWALK, maxX: x1 - SIDEWALK,
         minZ: z0 + SIDEWALK, maxZ: z1 - SIDEWALK,
-        slab, height, kind, cx, cz, bi, bj,
+        slab, height, kind, category, cx, cz, bi, bj,
       });
     }
   }
