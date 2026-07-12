@@ -43,7 +43,7 @@ export function createDrive(curve, length, opts = {}) {
   let resetHeld = false;
 
   function readInput() {
-    let steer = 0, throttle = 0, brake = 0, hand = false, look = false, horn = false, reset = false;
+    let steer = 0, throttle = 0, brake = 0, hand = false, look = false, horn = false, reset = false, boost = false;
     if (keys.has('ArrowLeft') || keys.has('KeyA')) steer -= 1;
     if (keys.has('ArrowRight') || keys.has('KeyD')) steer += 1;
     if (keys.has('ArrowUp') || keys.has('KeyW')) throttle = 1;
@@ -51,6 +51,7 @@ export function createDrive(curve, length, opts = {}) {
     if (keys.has('Space')) hand = true;
     if (keys.has('KeyB')) look = true;
     if (keys.has('KeyH')) horn = true;
+    if (keys.has('ShiftLeft') || keys.has('ShiftRight')) boost = true;
     let resetNow = keys.has('KeyR');
 
     const pad = padIndex !== null ? navigator.getGamepads()[padIndex] : null;
@@ -62,6 +63,7 @@ export function createDrive(curve, length, opts = {}) {
       hand = hand || !!pad.buttons[0]?.pressed;                          // A / Cross
       look = look || !!pad.buttons[1]?.pressed;                          // B / Circle
       horn = horn || !!pad.buttons[2]?.pressed;                          // X / Square
+      boost = boost || !!pad.buttons[5]?.pressed;                        // RB — nitro
       resetNow = resetNow || !!pad.buttons[8]?.pressed;                  // Back / Select
       const camBtn = !!pad.buttons[3]?.pressed;                          // Y / Triangle
       if (camBtn && !camHeld) cameraTapped = true;
@@ -72,7 +74,7 @@ export function createDrive(curve, length, opts = {}) {
     }
     reset = resetNow && !resetHeld; // edge-trigger
     resetHeld = resetNow;
-    return { steer: THREE.MathUtils.clamp(steer, -1, 1), throttle, brake, hand, look, horn, reset };
+    return { steer: THREE.MathUtils.clamp(steer, -1, 1), throttle, brake, hand, look, horn, reset, boost };
   }
 
   function rumble(strong, weak, ms) {
@@ -96,6 +98,7 @@ export function createDrive(curve, length, opts = {}) {
   let playing = false;
   let wallBuzz = 0;
   let onCurbPrev = false; // was the car on a sidewalk last frame (world mode)
+  let airY = 0, airVy = 0, airborne = false, jumpCool = 0; // stunt-jump state (free roam)
 
   // free-roam (open world) mode: no spline, drive anywhere and collide with the
   // static world. Controllable from the first frame (no attract takeover).
@@ -189,9 +192,11 @@ export function createDrive(curve, length, opts = {}) {
       yaw += yawVel * dt;
       heading.set(Math.sin(yaw), 0, Math.cos(yaw));
 
-      // throttle / brake / reverse
+      // throttle / brake / reverse (nitro boost raises accel + top speed)
+      const boosting = inp.boost && inp.throttle > 0 && fwdSpeed > -1;
+      const maxSp = boosting ? MAX_SPEED * 1.42 : MAX_SPEED;
       let acc = 0;
-      if (inp.throttle > 0) acc += inp.throttle * (TUNE.accel - TUNE.accel * 0.67 * Math.max(fwdSpeed, 0) / MAX_SPEED);
+      if (inp.throttle > 0) acc += inp.throttle * (TUNE.accel * (boosting ? 1.9 : 1) - TUNE.accel * 0.67 * Math.max(fwdSpeed, 0) / maxSp);
       if (inp.brake > 0) {
         if (fwdSpeed > 0.6) acc -= inp.brake * TUNE.brakeForce;
         else acc -= inp.brake * 7; // reverse
@@ -208,7 +213,7 @@ export function createDrive(curve, length, opts = {}) {
 
       // clamp forward/reverse speed
       const f2 = vel.dot(heading);
-      if (f2 > MAX_SPEED) vel.addScaledVector(heading, MAX_SPEED - f2);
+      if (f2 > maxSp) vel.addScaledVector(heading, maxSp - f2);
       if (f2 < -MAX_REVERSE) vel.addScaledVector(heading, -MAX_REVERSE - f2);
 
       pos.addScaledVector(vel, dt);
@@ -217,15 +222,41 @@ export function createDrive(curve, length, opts = {}) {
         // free roam: buildings hard-stop; curbs are mountable — bump up onto
         // the sidewalk with a jolt, drive it slower, and hop back down
         const fb = world.collision.resolve(pos, 1.5, vel);
-        if (fb.onCurb) {
-          if (!onCurbPrev && speed > 4) { vel.multiplyScalar(0.7); rumble(0.7, 0.5, 130); } // mount jolt
-          vel.multiplyScalar(Math.max(0, 1 - 2.4 * dt));   // bog down onto the kerb
-          const sp = vel.length();                          // hard cap: never a fast route
-          if (sp > TUNE.sidewalkMax) vel.multiplyScalar(TUNE.sidewalkMax / sp);
+
+        // stunt ramps: hit one at speed going up it → launch into the air
+        jumpCool = Math.max(0, jumpCool - dt);
+        if (world.ramps && !airborne && jumpCool <= 0) {
+          for (const r of world.ramps) {
+            const dx = pos.x - r.x, dz = pos.z - r.z;
+            const along = dx * r.dir[0] + dz * r.dir[1];
+            const perp = -dx * r.dir[1] + dz * r.dir[0];
+            if (Math.abs(along) > r.halfL || Math.abs(perp) > r.halfW) continue;
+            const speedUp = vel.x * r.dir[0] + vel.z * r.dir[1]; // speed up the ramp
+            if (speedUp > 13) { airborne = true; airVy = Math.min(speedUp * 0.44, 17); jumpCool = 1.4; rumble(0.6, 0.4, 90); }
+            break;
+          }
         }
-        onCurbPrev = fb.onCurb;
-        const targetY = fb.onCurb ? (world.curbY || 0) : 0;
-        pos.y += (targetY - pos.y) * Math.min(1, 9 * dt); // ride up/down the curb
+
+        if (airborne) {
+          airVy -= 26 * dt;                 // gravity
+          airY += airVy * dt;
+          if (airY <= 0) {                  // touchdown
+            airY = 0; airborne = false;
+            if (airVy < -7) { vel.multiplyScalar(0.88); rumble(1.0, 0.8, 200); }
+            airVy = 0;
+          }
+          pos.y = airY;
+        } else {
+          if (fb.onCurb) {
+            if (!onCurbPrev && speed > 4) { vel.multiplyScalar(0.7); rumble(0.7, 0.5, 130); } // mount jolt
+            vel.multiplyScalar(Math.max(0, 1 - 2.4 * dt));   // bog down onto the kerb
+            const sp = vel.length();                          // hard cap: never a fast route
+            if (sp > TUNE.sidewalkMax) vel.multiplyScalar(TUNE.sidewalkMax / sp);
+          }
+          onCurbPrev = fb.onCurb;
+          const targetY = fb.onCurb ? (world.curbY || 0) : 0;
+          pos.y += (targetY - pos.y) * Math.min(1, 9 * dt); // ride up/down the curb
+        }
         if (fb.knocked) { vel.multiplyScalar(0.65); rumble(0.9, 0.7, 180); } // ploughed a pole
         if (fb.hitHard && wallBuzz <= 0 && speed > 5) { rumble(0.8, 0.5, 150); wallBuzz = 0.35; }
       } else {
@@ -276,6 +307,8 @@ export function createDrive(curve, length, opts = {}) {
         throttle: inp.throttle,
         brake: inp.brake,
         horn: inp.horn,
+        boosting: inp.boost && inp.throttle > 0,
+        airborne,
         s: world ? 0 : sEst,
       };
     },
