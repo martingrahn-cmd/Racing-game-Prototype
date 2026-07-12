@@ -14,7 +14,7 @@ const MODELS = [
 const WALK = 1.3;       // m/s
 const DODGE_R = 5.5;    // how close the car must be to spook them
 
-export function createPedestrians(scene, model, count = 34) {
+export function createPedestrians(scene, model, count = 46) {
   const group = new THREE.Group();
   scene.add(group);
   const { ROAD_HW, SIDEWALK, CURB_Y } = model;
