@@ -159,6 +159,14 @@ fungerande trafikljus, trottoarer, en handfull instansierade prylar. Ingen trafi
 
 ## Öppna frågor / senare
 
+- **Naturlig stadsgräns.** Staden behöver ett trovärdigt slut istället för att bara
+  tona ut i dimma (idag ~12 s kant-till-kant åt båda håll). Idé: en **ö med vatten
+  runt** (hamn/kaj/strand) och **broar som är avstängda** (avspärrade tills spelet
+  öppnar fler distrikt). Ger ett Driver-likt inramat område och en naturlig ram för
+  utbyggnad distrikt för distrikt.
+- **Distrikts-DNA.** Densitetsgradienten (finans → bostad → villa) finns; nästa lager
+  är att varje distrikt känns eget: olika folk (gjort — zon-baserad publik),
+  ljussättning/stämning, gatubredd, prop-mix.
 - Minimap → full pan/zoom-stadskarta.
 - Polis-AI (jakter), uppdragsramverk (timer/skada/felony), Film Director-replay.
 - Garage-tutorial (Driver-hyllning) — avgränsat, byggs separat.

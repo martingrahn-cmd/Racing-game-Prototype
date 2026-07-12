@@ -120,11 +120,13 @@ export function buildWorld(scene, model) {
   const tints = [0xdfe9f2, 0xe9e2d2, 0xd2e6ec, 0xf0ebe0];
   const awnings = [0x8a3f39, 0x3d5c48, 0x41546e, 0x7a6a4a];
 
-  const aptSpots = [];
+  const aptSpots = [], villaSpots = [], villaBlocks = [];
+  const lotGrass = new THREE.MeshStandardMaterial({ color: 0x5f8f4e, roughness: 0.95, metalness: 0 });
   model.buildings.forEach((b, i) => {
-    // residential blocks are lined with real GLB apartment buildings instead of
-    // one procedural mass — collect their placements, build them in one pass below
+    // residential blocks are lined with real GLB apartment buildings; villa blocks
+    // (the edge) get a garden lot with a few detached houses — both instanced below
     if (b.category === 'residential') { collectApartments(b, aptSpots); return; }
+    if (b.category === 'villa') { villaBlocks.push(b); collectVillas(b, villaSpots); return; }
     const w = b.maxX - b.minX, d = b.maxZ - b.minZ, h = b.height;
     const cx = b.cx, cz = b.cz;
     const f = facades[b.kind];
@@ -173,6 +175,11 @@ export function buildWorld(scene, model) {
 
   if (model.plaza) buildPlaza(group, model.plaza, CURB_Y);
   buildApartments(group, aptSpots, CURB_Y);
+  for (const b of villaBlocks) {
+    const lot = new THREE.Mesh(new THREE.BoxGeometry(b.maxX - b.minX + 2, 0.06, b.maxZ - b.minZ + 2), lotGrass);
+    lot.position.set(b.cx, CURB_Y + 0.04, b.cz); lot.receiveShadow = true; group.add(lot);
+  }
+  buildVillas(group, villaSpots, CURB_Y);
   buildStreetLamps(group, model);
 
   // -------------------------------------------------- distant filler
@@ -321,6 +328,55 @@ function buildApartments(group, spots, CURB_Y) {
       group.add(im);
     }
   }, undefined, () => { /* keep the block empty if the model fails to load */ });
+}
+
+// A villa block: detached houses set back on a garden lot, facing the streets.
+const VILLA_MODELS = ['assets/poly/house1.glb', 'assets/poly/house2.glb', 'assets/poly/villa1.glb'];
+function collectVillas(b, out) {
+  const W = 15;    // house + garden spacing along the street
+  const OFF = 6;   // set back from the street edge (front garden)
+  const edges = [
+    { horiz: true, fix: b.minZ + OFF, a: b.minX, len: b.maxX - b.minX, yaw: Math.PI },
+    { horiz: true, fix: b.maxZ - OFF, a: b.minX, len: b.maxX - b.minX, yaw: 0 },
+    { horiz: false, fix: b.minX + OFF, a: b.minZ, len: b.maxZ - b.minZ, yaw: -Math.PI / 2 },
+    { horiz: false, fix: b.maxX - OFF, a: b.minZ, len: b.maxZ - b.minZ, yaw: Math.PI / 2 },
+  ];
+  let seed = (b.bi * 31 + b.bj * 17) & 255;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  for (const e of edges) {
+    const usable = e.len - 2 * OFF;
+    const n = Math.max(1, Math.round(usable / W));
+    for (let i = 0; i < n; i++) {
+      const along = e.a + OFF + usable * ((i + 0.5) / n);
+      out.push({ x: e.horiz ? along : e.fix, z: e.horiz ? e.fix : along, yaw: e.yaw, m: Math.floor(rnd() * VILLA_MODELS.length) });
+    }
+  }
+}
+
+function buildVillas(group, spots, CURB_Y) {
+  if (!spots.length) return;
+  const loader = makeGLTFLoader();
+  VILLA_MODELS.forEach((path, mi) => {
+    const list = spots.filter((s) => s.m === mi);
+    if (!list.length) return;
+    loader.load(path, (gltf) => {
+      gltf.scene.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(gltf.scene);
+      const size = box.getSize(new THREE.Vector3());
+      const s = 9 / Math.max(size.x, size.z);
+      const N = new THREE.Matrix4().makeScale(s, s, s)
+        .multiply(new THREE.Matrix4().makeTranslation(-(box.min.x + box.max.x) / 2, -box.min.y, -(box.min.z + box.max.z) / 2));
+      const parts = [];
+      gltf.scene.traverse((o) => { if (o.isMesh) { const g = o.geometry.clone(); g.applyMatrix4(o.matrixWorld); g.applyMatrix4(N); parts.push({ geometry: g, material: o.material }); } });
+      for (const part of parts) {
+        const im = new THREE.InstancedMesh(part.geometry, part.material, list.length);
+        im.castShadow = true; im.receiveShadow = true;
+        const M = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
+        for (let i = 0; i < list.length; i++) { q.setFromAxisAngle(up, list[i].yaw); p.set(list[i].x, CURB_Y, list[i].z); M.compose(p, q, one); im.setMatrixAt(i, M); }
+        group.add(im);
+      }
+    }, undefined, () => { /* skip a villa model that fails to load */ });
+  });
 }
 
 // Merge indexed geometries keeping position + normal (for untextured props).
