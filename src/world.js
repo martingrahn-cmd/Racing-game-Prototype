@@ -136,7 +136,7 @@ export function buildWorld(scene, model) {
   const tints = [0xdfe9f2, 0xe9e2d2, 0xd2e6ec, 0xf0ebe0];
   const awnings = [0x8a3f39, 0x3d5c48, 0x41546e, 0x7a6a4a];
 
-  const aptSpots = [], villaSpots = [], villaBlocks = [];
+  const aptSpots = [], villaSpots = [], villaBlocks = [], doors = [];
   const lotGrass = new THREE.MeshStandardMaterial({ color: 0x5f8f4e, roughness: 0.95, metalness: 0 });
   model.buildings.forEach((b, i) => {
     // residential blocks are lined with real GLB apartment buildings; villa blocks
@@ -186,7 +186,7 @@ export function buildWorld(scene, model) {
       }
     }
 
-    addEntrance(group, obstacles, b, { doorGlass, frameMat, awn: awnings[i % awnings.length], frameMat2: frameMat, bollardMat, sconceMat, signMat, curbSide }, CURB_Y);
+    addEntrance(group, obstacles, doors, b, { doorGlass, frameMat, awn: awnings[i % awnings.length], frameMat2: frameMat, bollardMat, sconceMat, signMat, curbSide }, CURB_Y);
   });
 
   if (model.plaza) buildPlaza(group, model.plaza, CURB_Y);
@@ -255,20 +255,42 @@ export function buildWorld(scene, model) {
   }
 
   const buildingAABBs = model.buildings.map((b) => ({ minX: b.minX, maxX: b.maxX, minZ: b.minZ, maxZ: b.maxZ }));
-  return { group, colliders: { buildings: buildingAABBs }, obstacles };
+  return { group, colliders: { buildings: buildingAABBs }, obstacles, updateDoors: (dt, playerPos) => updateDoors(doors, dt, playerPos) };
 }
 
 // street entrance on the building's south (-z) face: recessed portal with frame,
 // awning, signage, sconces and knockable bollards
-function addEntrance(group, obstacles, b, m, CURB_Y) {
+// automatic sliding doors: open when the player is close and now and then on
+// their own (as if people are coming and going), revealing the lit lobby (#52)
+function updateDoors(doors, dt, playerPos) {
+  for (const d of doors) {
+    d.timer -= dt;
+    if (d.timer <= 0) { d.ambient = !d.ambient; d.timer = d.ambient ? 1.4 + d.rnd() * 1.6 : 7 + d.rnd() * 12; }
+    const near = playerPos ? ((d.x - playerPos.x) ** 2 + (d.z - playerPos.z) ** 2) < 121 : false; // 11 m
+    const target = near || d.ambient ? 1 : 0;
+    d.open += (target - d.open) * Math.min(1, dt * 6);
+    const slide = d.open * (d.hw - 0.12);
+    d.left.position.x = d.baseL - slide;
+    d.right.position.x = d.baseR + slide;
+  }
+}
+
+function addEntrance(group, obstacles, doors, b, m, CURB_Y) {
   const cx = b.cx, faceZ = b.minZ, nz = -1;
   const DW = 5, DH = 3.6, REV = 0.75;
   const lobbyMat = new THREE.MeshStandardMaterial({ color: 0x120d06, emissive: 0xffdca0, emissiveIntensity: 0 });
   registerEmissive(lobbyMat, 0, 0.85);
   const lobby = new THREE.Mesh(new THREE.PlaneGeometry(DW - 0.4, DH - 0.4), lobbyMat);
   lobby.position.set(cx, CURB_Y + DH / 2, faceZ + nz * 0.02); lobby.rotation.y = Math.PI; group.add(lobby);
-  const glass = new THREE.Mesh(new THREE.PlaneGeometry(DW, DH), m.doorGlass);
-  glass.position.set(cx, CURB_Y + DH / 2, faceZ + nz * 0.05); glass.rotation.y = Math.PI; group.add(glass);
+  // two sliding glass panels instead of one fixed pane
+  const hw = DW / 2, panelGeo = new THREE.PlaneGeometry(hw, DH);
+  const left = new THREE.Mesh(panelGeo, m.doorGlass);
+  left.position.set(cx - DW / 4, CURB_Y + DH / 2, faceZ + nz * 0.05); left.rotation.y = Math.PI; group.add(left);
+  const right = new THREE.Mesh(panelGeo, m.doorGlass);
+  right.position.set(cx + DW / 4, CURB_Y + DH / 2, faceZ + nz * 0.05); right.rotation.y = Math.PI; group.add(right);
+  let s = (Math.round(cx) * 131 + Math.round(faceZ) * 977) & 0x7fffffff;
+  const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+  doors.push({ x: cx, z: faceZ, left, right, baseL: cx - DW / 4, baseR: cx + DW / 4, hw, open: 0, ambient: false, timer: 2 + rnd() * 12, rnd });
   for (const s of [-1, 1]) {
     const jamb = new THREE.Mesh(new THREE.BoxGeometry(0.45, DH + 0.5, REV), m.frameMat);
     jamb.position.set(cx + s * (DW / 2 + 0.22), CURB_Y + (DH + 0.5) / 2, faceZ + nz * REV / 2);
