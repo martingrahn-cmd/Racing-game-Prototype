@@ -40,14 +40,17 @@ export function createSignals(scene, model) {
   const poles = [];
   const obstacles = [];
 
-  const postGeo = new THREE.CylinderGeometry(0.13, 0.16, 5.8, 8);
+  const backMat = new THREE.MeshStandardMaterial({ color: 0xc9b83a, roughness: 0.6, metalness: 0.1 });
+  const postGeo = new THREE.CylinderGeometry(0.13, 0.16, 6.6, 8); // taller so tall trucks clear the head (#49)
   const hangGeo = new THREE.BoxGeometry(0.08, 0.95, 0.08);
-  const housingGeo = new THREE.BoxGeometry(0.62, 1.72, 0.34);
-  const discGeo = new THREE.CircleGeometry(0.18, 18);
-  const hoodGeo = new THREE.BoxGeometry(0.42, 0.05, 0.17);
+  const housingGeo = new THREE.BoxGeometry(0.66, 1.74, 0.4);
+  const backGeo = new THREE.BoxGeometry(0.86, 1.94, 0.05);   // yellow retroreflective backboard
+  const bezelGeo = new THREE.TorusGeometry(0.2, 0.035, 8, 18); // black rim around each lens
+  const discGeo = new THREE.CircleGeometry(0.17, 18);
+  const hoodGeo = new THREE.BoxGeometry(0.44, 0.06, 0.2);
   const armX = new THREE.BoxGeometry(5.6, 0.13, 0.13);
   const armZ = new THREE.BoxGeometry(0.13, 0.13, 5.6);
-  const ARM_LEN = 5.6, ARM_Y = 5.3;
+  const ARM_LEN = 5.6, ARM_Y = 6.0;
 
   for (const it of model.signalized) {
     for (const def of poleDefs) {
@@ -59,7 +62,7 @@ export function createSignals(scene, model) {
       group.add(pole);
 
       const post = new THREE.Mesh(postGeo, poleMat);
-      post.position.y = 2.9; post.castShadow = true; pole.add(post);
+      post.position.y = 3.3; post.castShadow = true; pole.add(post);
       const arm = new THREE.Mesh(ax !== 0 ? armX : armZ, poleMat);
       arm.position.set(ax * ARM_LEN / 2, ARM_Y, az * ARM_LEN / 2);
       pole.add(arm);
@@ -71,6 +74,8 @@ export function createSignals(scene, model) {
       pole.add(head);
       const hang = new THREE.Mesh(hangGeo, poleMat);
       hang.position.set(0, 0.95, 0); head.add(hang);
+      const back = new THREE.Mesh(backGeo, backMat);
+      back.position.set(0, 0, -0.04); back.castShadow = true; head.add(back);
       const housing = new THREE.Mesh(housingGeo, housingMat);
       housing.castShadow = true; head.add(housing);
 
@@ -78,10 +83,12 @@ export function createSignals(scene, model) {
       [['red', RED], ['yellow', YEL], ['green', GRN]].forEach(([name, col], i) => {
         const y = 0.52 - i * 0.52;
         const mat = new THREE.MeshStandardMaterial({ color: 0x0a0a0a, emissive: col, emissiveIntensity: 0.03, roughness: 0.4, side: THREE.DoubleSide });
+        const bezel = new THREE.Mesh(bezelGeo, housingMat);
+        bezel.position.set(0, y, 0.2); head.add(bezel);
         const disc = new THREE.Mesh(discGeo, mat);
-        disc.position.set(0, y, 0.18); head.add(disc);
+        disc.position.set(0, y, 0.21); head.add(disc);
         const hood = new THREE.Mesh(hoodGeo, housingMat);
-        hood.position.set(0, y + 0.21, 0.23); head.add(hood);
+        hood.position.set(0, y + 0.2, 0.26); head.add(hood);
         lamps[name] = mat;
       });
       poles.push({ axis: def.axis, lamps });
