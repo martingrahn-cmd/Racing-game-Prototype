@@ -8,8 +8,24 @@ import {
   makeSidewalkTexture, makeConcreteKerbTexture, makeRoofTexture,
   makeFacadeGlass, makeFacadeRibbon, makeFacadeResidential,
 } from './textures.js';
-import { registerEmissive, registerOpacity } from './night.js';
+import { registerEmissive, registerOpacity, registerCustom } from './night.js';
 import { makeGLTFLoader } from './car.js';
+
+// Make a textured building glow from its windows at dusk/night. There's no window
+// mask on these low-poly models, so we reuse the colour map as an emissive map at
+// low intensity — the bright window areas glow more than the walls. Peaks in the
+// evening, dims (but stays on) deep into the night, off in daylight.
+function litWindows(mat) {
+  if (!mat || !mat.isMeshStandardMaterial || !mat.map || mat.userData.lit) return;
+  mat.userData.lit = true;
+  mat.emissive = new THREE.Color(0xffe6b0);
+  mat.emissiveMap = mat.map;
+  mat.emissiveIntensity = 0;
+  registerCustom((d) => {
+    const n = 1 - d; // 0 = noon, 1 = midnight
+    mat.emissiveIntensity = n < 0.45 ? (n / 0.45) * 0.55 : Math.max(0.3, 0.55 - (n - 0.45) * 0.4);
+  });
+}
 
 function makeAsphalt() {
   const c = document.createElement('canvas');
@@ -175,9 +191,21 @@ export function buildWorld(scene, model) {
 
   if (model.plaza) buildPlaza(group, model.plaza, CURB_Y);
   buildApartments(group, aptSpots, CURB_Y);
+  const hedgeMat = new THREE.MeshStandardMaterial({ color: 0x3f7a3a, roughness: 0.95, metalness: 0 });
+  const hedgeGeo = new THREE.BoxGeometry(1, 1, 1);
   for (const b of villaBlocks) {
     const lot = new THREE.Mesh(new THREE.BoxGeometry(b.maxX - b.minX + 2, 0.06, b.maxZ - b.minZ + 2), lotGrass);
     lot.position.set(b.cx, CURB_Y + 0.04, b.cz); lot.receiveShadow = true; group.add(lot);
+    // garden hedges dividing the plots so the lawn reads as gardens, not a field
+    let seed = (b.bi * 13 + b.bj * 29) & 255;
+    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    for (let i = 0; i < 7; i++) {
+      const long = 3 + rnd() * 5;
+      const hedge = new THREE.Mesh(hedgeGeo, hedgeMat);
+      hedge.scale.set(rnd() < 0.5 ? long : 0.7, 0.9, rnd() < 0.5 ? 0.7 : long);
+      hedge.position.set(b.minX + 5 + rnd() * (b.maxX - b.minX - 10), CURB_Y + 0.45, b.minZ + 5 + rnd() * (b.maxZ - b.minZ - 10));
+      hedge.castShadow = true; hedge.receiveShadow = true; group.add(hedge);
+    }
   }
   buildVillas(group, villaSpots, CURB_Y);
   buildStreetLamps(group, model);
@@ -321,6 +349,7 @@ function buildApartments(group, spots, CURB_Y) {
     const parts = [];
     gltf.scene.traverse((o) => { if (o.isMesh) { const g = o.geometry.clone(); g.applyMatrix4(o.matrixWorld); g.applyMatrix4(N); parts.push({ geometry: g, material: o.material }); } });
     for (const part of parts) {
+      litWindows(part.material);
       const im = new THREE.InstancedMesh(part.geometry, part.material, spots.length);
       im.castShadow = true; im.receiveShadow = true;
       const M = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
@@ -331,7 +360,8 @@ function buildApartments(group, spots, CURB_Y) {
 }
 
 // A villa block: detached houses set back on a garden lot, facing the streets.
-const VILLA_MODELS = ['assets/poly/house1.glb', 'assets/poly/house2.glb', 'assets/poly/villa1.glb'];
+// house2 ("Small Building") reads as a plain box, not a home — use the two houses
+const VILLA_MODELS = ['assets/poly/house1.glb', 'assets/poly/villa1.glb'];
 function collectVillas(b, out) {
   const W = 15;    // house + garden spacing along the street
   const OFF = 6;   // set back from the street edge (front garden)
@@ -345,11 +375,20 @@ function collectVillas(b, out) {
   const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
   for (const e of edges) {
     const usable = e.len - 2 * OFF;
-    const n = Math.max(1, Math.round(usable / W));
+    const n = Math.max(2, Math.round(usable / W));
     for (let i = 0; i < n; i++) {
       const along = e.a + OFF + usable * ((i + 0.5) / n);
       out.push({ x: e.horiz ? along : e.fix, z: e.horiz ? e.fix : along, yaw: e.yaw, m: Math.floor(rnd() * VILLA_MODELS.length) });
     }
+  }
+  // a couple of houses set into the middle so the lot isn't a bare lawn
+  const inner = 2 + Math.floor(rnd() * 2);
+  for (let i = 0; i < inner; i++) {
+    out.push({
+      x: b.minX + 12 + rnd() * (b.maxX - b.minX - 24),
+      z: b.minZ + 12 + rnd() * (b.maxZ - b.minZ - 24),
+      yaw: rnd() * Math.PI * 2, m: Math.floor(rnd() * VILLA_MODELS.length),
+    });
   }
 }
 
@@ -369,6 +408,7 @@ function buildVillas(group, spots, CURB_Y) {
       const parts = [];
       gltf.scene.traverse((o) => { if (o.isMesh) { const g = o.geometry.clone(); g.applyMatrix4(o.matrixWorld); g.applyMatrix4(N); parts.push({ geometry: g, material: o.material }); } });
       for (const part of parts) {
+        litWindows(part.material);
         const im = new THREE.InstancedMesh(part.geometry, part.material, list.length);
         im.castShadow = true; im.receiveShadow = true;
         const M = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
