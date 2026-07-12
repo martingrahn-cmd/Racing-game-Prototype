@@ -284,11 +284,12 @@ function addEntrance(group, obstacles, b, m, CURB_Y) {
   for (const s of [-1, 1]) {
     const sconce = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.5, 0.16), m.sconceMat);
     sconce.position.set(cx + s * (DW / 2 + 0.42), CURB_Y + 2.7, faceZ + nz * 0.16); group.add(sconce);
+    const bx = cx + s * (DW / 2 + 0.9), bz = faceZ + nz * 2.4;
+    const bg = new THREE.Group(); bg.position.set(bx, CURB_Y, bz);
     const bollard = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.9, 10), m.bollardMat);
-    bollard.position.set(cx + s * (DW / 2 + 0.9), CURB_Y + 0.45, faceZ + nz * 2.4);
-    bollard.castShadow = true; group.add(bollard);
-    obstacles.push({ x: bollard.position.x, z: bollard.position.z, r: 0.3, knocked: false,
-      knock: () => { bollard.rotation.x = 1.4; bollard.position.y = CURB_Y + 0.1; } });
+    bollard.position.y = 0.45; bollard.castShadow = true; bg.add(bollard);
+    group.add(bg);
+    obstacles.push({ x: bx, z: bz, r: 0.3, group: bg, axis: 'x', sign: nz >= 0 ? 1 : -1, knocked: false, fall: 0 });
   }
 }
 

@@ -93,8 +93,8 @@ export function createSignals(scene, model) {
       });
       poles.push({ axis: def.axis, lamps });
       obstacles.push({
-        x: cx, z: cz, r: 0.45, knocked: false,
-        knock: () => { pole.rotation.x = (def.corner[1] >= 0 ? 1 : -1) * 1.4; pole.position.y = 0.15; },
+        x: cx, z: cz, r: 0.45, group: pole, axis: 'x',
+        sign: def.corner[1] >= 0 ? 1 : -1, knocked: false, fall: 0,
       });
     }
   }
