@@ -90,11 +90,12 @@ const skidmarks = createSkidmarks(scene);
 
 let curve = null, length = 0, cornerSpans = null;
 let extras = null, traffic = null, minimap = null, signals = null, worldTraffic = null, pedestrians = null, drive;
-let worldModel = null, worldAttract = false, worldCollision = null;
+let worldModel = null, worldAttract = false, worldCollision = null, worldGeom = null;
 if (WORLD) {
   const model = createCityModel();
   worldModel = model; worldAttract = true;
   const worldObj = buildWorld(scene, model);
+  worldGeom = worldObj;
   signals = createSignals(scene, model);
   worldTraffic = createWorldTraffic(scene, model, signals);
   pedestrians = createPedestrians(scene, model, signals);
@@ -623,6 +624,7 @@ function loop(now) {
   const kmh = updateCamera(dt, perfTime, st);
   if (WORLD) {
     signals.update(dt);
+    if (worldGeom) worldGeom.updateDoors(dt, st ? st.pos : null);
     if (worldCollision) worldCollision.update(dt, st ? st.pos : null);
     worldTraffic.update(dt, st ? st.pos : null);
     if (pedestrians) pedestrians.update(dt, st ? st.pos : null);
