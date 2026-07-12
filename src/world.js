@@ -189,7 +189,7 @@ export function buildWorld(scene, model) {
     addEntrance(group, obstacles, doors, b, { doorGlass, frameMat, awn: awnings[i % awnings.length], frameMat2: frameMat, bollardMat, sconceMat, signMat, curbSide }, CURB_Y);
   });
 
-  if (model.plaza) buildPlaza(group, model.plaza, CURB_Y);
+  const plazaR = model.plaza ? buildPlaza(group, model.plaza, CURB_Y) : null;
   buildApartments(group, aptSpots, CURB_Y);
   const hedgeMat = new THREE.MeshStandardMaterial({ color: 0x3f7a3a, roughness: 0.95, metalness: 0 });
   const hedgeGeo = new THREE.BoxGeometry(1, 1, 1);
@@ -257,7 +257,11 @@ export function buildWorld(scene, model) {
   const ramps = buildRamps(group, model);
 
   const buildingAABBs = model.buildings.map((b) => ({ minX: b.minX, maxX: b.maxX, minZ: b.minZ, maxZ: b.maxZ }));
-  return { group, colliders: { buildings: buildingAABBs }, obstacles, ramps, updateDoors: (dt, playerPos) => updateDoors(doors, dt, playerPos) };
+  return {
+    group, colliders: { buildings: buildingAABBs }, obstacles, ramps,
+    updateDoors: (dt, playerPos) => updateDoors(doors, dt, playerPos),
+    updateClock: (timeOfDay) => updateClock(plazaR && plazaR.clockHands, timeOfDay),
+  };
 }
 
 // street entrance on the building's south (-z) face: recessed portal with frame,
@@ -577,11 +581,17 @@ function buildPlaza(group, plaza, CURB_Y) {
     mound.scale.y = hy / r; mound.position.set(cx + mx, CURB_Y + 0.03, cz + mz);
     mound.receiveShadow = true; mound.castShadow = true; group.add(mound);
   }
-  // gravel walking paths (a plus through the park), matching the pedestrian routes
+  // gravel walking paths: a roundabout ring circling the fountain, fed by four
+  // straight approaches from the entrances (#78 — no path straight through the
+  // fountain any more).
   const pathMat = new THREE.MeshStandardMaterial({ color: 0xbdb09a, roughness: 1, metalness: 0 });
-  for (const horiz of [true, false]) {
-    const path = new THREE.Mesh(new THREE.BoxGeometry(horiz ? w - 4 : 2.6, 0.06, horiz ? 2.6 : d - 4), pathMat);
-    path.position.set(cx, CURB_Y + 0.06, cz); path.receiveShadow = true; group.add(path);
+  const RING_R = 12, RING_W = 2.8;
+  const ringPath = new THREE.Mesh(new THREE.RingGeometry(RING_R - RING_W / 2, RING_R + RING_W / 2, 44), pathMat);
+  ringPath.rotation.x = -Math.PI / 2; ringPath.position.set(cx, CURB_Y + 0.06, cz); ringPath.receiveShadow = true; group.add(ringPath);
+  for (const [ox, oz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const len = (w / 2 - 2) - RING_R, mid = RING_R + len / 2;
+    const spur = new THREE.Mesh(new THREE.BoxGeometry(ox ? len : RING_W, 0.06, oz ? len : RING_W), pathMat);
+    spur.position.set(cx + ox * mid, CURB_Y + 0.06, cz + oz * mid); spur.receiveShadow = true; group.add(spur);
   }
   // fountain
   const basin = new THREE.Mesh(new THREE.CylinderGeometry(6, 6.4, 0.9, 28), stone);
@@ -606,13 +616,8 @@ function buildPlaza(group, plaza, CURB_Y) {
     const drop = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 6), sprayMat);
     drop.position.set(cx + Math.cos(a) * 4.6, CURB_Y + 2.4, cz + Math.sin(a) * 4.6); group.add(drop);
   }
-  // statue on a pedestal
-  const ped = new THREE.Mesh(new THREE.BoxGeometry(2.4, 2.2, 2.4), stone);
-  ped.position.set(cx - 14, CURB_Y + 1.1, cz + 12); ped.castShadow = true; group.add(ped);
-  const figure = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.7, 3.4, 10), metal);
-  figure.position.set(cx - 14, CURB_Y + 3.9, cz + 12); figure.castShadow = true; group.add(figure);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.55, 12, 10), metal);
-  head.position.set(cx - 14, CURB_Y + 5.9, cz + 12); group.add(head);
+  // (the real statue model is placed at cx-14,cz+12 by props_world; the crude
+  // procedural figure that used to stand here was removed — one statue is enough)
   // trees at the corners
   for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
     const tx = cx + sx * (w / 2 - 6), tz = cz + sz * (d / 2 - 6);
@@ -621,35 +626,66 @@ function buildPlaza(group, plaza, CURB_Y) {
     const cr = new THREE.Mesh(new THREE.SphereGeometry(2.6, 12, 10), leaf);
     cr.position.set(tx, CURB_Y + 4.6, tz); cr.scale.y = 0.85; cr.castShadow = true; group.add(cr);
   }
-  // playground swing set
+  // ---- playground: fenced gravel yard with a swing set + slide, opening toward
+  // the fountain (#76 — no more statue standing in the middle of it) ----
   const gx = cx + 15, gz = cz - 13;
+  const sand = new THREE.MeshStandardMaterial({ color: 0xd8c79a, roughness: 1, metalness: 0 });
+  const pen = new THREE.Mesh(new THREE.BoxGeometry(11, 0.07, 11), sand);
+  pen.position.set(gx, CURB_Y + 0.05, gz); pen.receiveShadow = true; group.add(pen);
+  const picket = new THREE.MeshStandardMaterial({ color: 0x8a5a3a, roughness: 0.85 });
+  const HALF = 5.4, PH = 0.8, OPEN = 2.2;
+  const fenceRun = (x0, z0, x1, z1) => {
+    const r = new THREE.Mesh(new THREE.BoxGeometry(Math.abs(x1 - x0) || 0.13, PH, Math.abs(z1 - z0) || 0.13), picket);
+    r.position.set((x0 + x1) / 2, CURB_Y + PH / 2, (z0 + z1) / 2); r.castShadow = true; group.add(r);
+  };
+  fenceRun(gx - HALF, gz - HALF, gx + HALF, gz - HALF);   // south
+  fenceRun(gx - HALF, gz + HALF, gx + HALF, gz + HALF);   // north
+  fenceRun(gx + HALF, gz - HALF, gx + HALF, gz + HALF);   // east
+  fenceRun(gx - HALF, gz - HALF, gx - HALF, gz - OPEN);   // west, split for the gate
+  fenceRun(gx - HALF, gz + OPEN, gx - HALF, gz + HALF);   //   (opening faces the fountain)
+  // swing set (shifted to the north half of the yard)
+  const swZ = gz + 2.2;
   for (const s of [-1, 1]) {
     const leg1 = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 3.4, 6), metal);
-    leg1.position.set(gx - 2.2, CURB_Y + 1.7, gz + s * 1.6); leg1.rotation.x = s * 0.28; group.add(leg1);
+    leg1.position.set(gx - 2.2, CURB_Y + 1.7, swZ + s * 1.4); leg1.rotation.x = s * 0.28; group.add(leg1);
     const leg2 = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 3.4, 6), metal);
-    leg2.position.set(gx + 2.2, CURB_Y + 1.7, gz + s * 1.6); leg2.rotation.x = s * 0.28; group.add(leg2);
+    leg2.position.set(gx + 2.2, CURB_Y + 1.7, swZ + s * 1.4); leg2.rotation.x = s * 0.28; group.add(leg2);
   }
   const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 4.8, 6), metal);
-  beam.rotation.z = Math.PI / 2; beam.position.set(gx, CURB_Y + 3.3, gz); group.add(beam);
+  beam.rotation.z = Math.PI / 2; beam.position.set(gx, CURB_Y + 3.3, swZ); group.add(beam);
   for (const off of [-1.2, 1.2]) {
     const seat = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.1, 0.35), new THREE.MeshStandardMaterial({ color: 0x333a3f, roughness: 0.8 }));
-    seat.position.set(gx + off, CURB_Y + 1.0, gz); group.add(seat);
+    seat.position.set(gx + off, CURB_Y + 1.0, swZ); group.add(seat);
     for (const s of [-1, 1]) {
       const chain = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 2.3, 4), metal);
-      chain.position.set(gx + off, CURB_Y + 2.15, gz + s * 0.15); group.add(chain);
+      chain.position.set(gx + off, CURB_Y + 2.15, swZ + s * 0.15); group.add(chain);
     }
   }
+  // a little slide in the south half
+  const slideMat = new THREE.MeshStandardMaterial({ color: 0x3f7fb0, roughness: 0.45, metalness: 0.3 });
+  const slX = gx, slZ = gz - 2.8;
+  const ramp = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.1, 3.6), slideMat);
+  ramp.position.set(slX, CURB_Y + 1.05, slZ); ramp.rotation.x = 0.52; ramp.castShadow = true; group.add(ramp);
+  const platform = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.1, 1.0), slideMat);
+  platform.position.set(slX, CURB_Y + 1.95, slZ - 1.9); group.add(platform);
+  for (const s of [-1, 1]) {
+    const rung = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 2.1, 5), metal);
+    rung.position.set(slX + s * 0.42, CURB_Y + 1.0, slZ - 2.3); group.add(rung);
+  }
 
-  // ---- benches ringing the fountain (facing in) ----
+  // ---- benches just outside the roundabout, facing the fountain (#77/#78:
+  // none sit on an approach axis or block a path) ----
   const wood = new THREE.MeshStandardMaterial({ color: 0x6a4a2f, roughness: 0.8, metalness: 0.05 });
-  for (let i = 0; i < 6; i++) {
-    const ang = (i / 6) * Math.PI * 2 + 0.3;
-    const bx = cx + Math.cos(ang) * 9.2, bz = cz + Math.sin(ang) * 9.2;
+  const benchR = RING_R + 2.7;
+  for (let i = 0; i < 8; i++) {
+    const ang = Math.PI / 8 + (i / 8) * Math.PI * 2;   // offset so none align with the 4 spurs
+    const bx = cx + Math.cos(ang) * benchR, bz = cz + Math.sin(ang) * benchR;
     const bench = new THREE.Group();
     const seat = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.1, 0.5), wood); seat.position.y = 0.46; bench.add(seat);
     const back = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.5, 0.1), wood); back.position.set(0, 0.73, -0.2); bench.add(back);
     for (const s of [-0.82, 0.82]) { const lg = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.46, 0.5), metal); lg.position.set(s, 0.23, 0); bench.add(lg); }
-    bench.position.set(bx, CURB_Y, bz); bench.rotation.y = ang + Math.PI / 2; bench.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    // seat faces inward (back on the outer side)
+    bench.position.set(bx, CURB_Y, bz); bench.rotation.y = -ang - Math.PI / 2; bench.traverse((o) => { if (o.isMesh) o.castShadow = true; });
     group.add(bench);
   }
 
@@ -682,19 +718,41 @@ function buildPlaza(group, plaza, CURB_Y) {
   const gzRoof = new THREE.Mesh(new THREE.ConeGeometry(3.7, 1.8, 8), new THREE.MeshStandardMaterial({ color: 0x5a6b74, roughness: 0.6, metalness: 0.3 }));
   gzRoof.position.set(gzx, CURB_Y + 4.6, gzz); gzRoof.castShadow = true; group.add(gzRoof);
 
-  // ---- clock tower landmark ----
+  // ---- clock tower landmark (four faces show the in-game time, #73) ----
   const ctx = cx + 15, ctz = cz + 14;
-  const shaft = new THREE.Mesh(new THREE.BoxGeometry(2.6, 13, 2.6), new THREE.MeshStandardMaterial({ color: 0xcfc7b6, roughness: 0.85 }));
+  const brick = new THREE.MeshStandardMaterial({ color: 0xb9a894, roughness: 0.9 });
+  const trim = new THREE.MeshStandardMaterial({ color: 0x8a7a66, roughness: 0.85 });
+  const shaft = new THREE.Mesh(new THREE.BoxGeometry(2.6, 13, 2.6), brick);
   shaft.position.set(ctx, CURB_Y + 6.5, ctz); shaft.castShadow = true; group.add(shaft);
+  // cornice band + belfry housing the faces
+  const cornice = new THREE.Mesh(new THREE.BoxGeometry(3.1, 0.5, 3.1), trim);
+  cornice.position.set(ctx, CURB_Y + 9.4, ctz); cornice.castShadow = true; group.add(cornice);
+  const belfry = new THREE.Mesh(new THREE.BoxGeometry(2.9, 3.2, 2.9), brick);
+  belfry.position.set(ctx, CURB_Y + 11.2, ctz); belfry.castShadow = true; group.add(belfry);
   const faceMat = new THREE.MeshStandardMaterial({ color: 0xf4f0e6, emissive: 0xffe6a8, emissiveIntensity: 0.1, roughness: 0.5 });
   registerEmissive(faceMat, 0.1, 1.4);
+  const handMat = new THREE.MeshStandardMaterial({ color: 0x1b1b1b, roughness: 0.5 });
+  const clockHands = [];
   for (const [ox, oz] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
-    const face = new THREE.Mesh(new THREE.CircleGeometry(0.9, 20), faceMat);
-    face.position.set(ctx + ox * 1.32, CURB_Y + 11, ctz + oz * 1.32);
-    face.lookAt(ctx + ox * 4, CURB_Y + 11, ctz + oz * 4); group.add(face);
+    const faceG = new THREE.Group();
+    faceG.position.set(ctx + ox * 1.46, CURB_Y + 11.2, ctz + oz * 1.46);
+    faceG.lookAt(ctx + ox * 4, CURB_Y + 11.2, ctz + oz * 4); // +z of the group points outward
+    group.add(faceG);
+    const face = new THREE.Mesh(new THREE.CircleGeometry(0.95, 28), faceMat);
+    face.position.z = 0.01; faceG.add(face);
+    for (let h = 0; h < 12; h++) {
+      const a = (h / 12) * Math.PI * 2;
+      const tick = new THREE.Mesh(new THREE.BoxGeometry(h % 3 ? 0.05 : 0.09, 0.16, 0.02), handMat);
+      tick.position.set(Math.sin(a) * 0.8, Math.cos(a) * 0.8, 0.03); tick.rotation.z = -a; faceG.add(tick);
+    }
+    const hour = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.52, 0.03), handMat);
+    hour.geometry.translate(0, 0.21, 0); hour.position.z = 0.05; faceG.add(hour);
+    const minute = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.8, 0.03), handMat);
+    minute.geometry.translate(0, 0.33, 0); minute.position.z = 0.06; faceG.add(minute);
+    clockHands.push({ hour, minute });
   }
-  const ctRoof = new THREE.Mesh(new THREE.ConeGeometry(2.2, 2.4, 4), new THREE.MeshStandardMaterial({ color: 0x4a5560, roughness: 0.6, metalness: 0.3 }));
-  ctRoof.rotation.y = Math.PI / 4; ctRoof.position.set(ctx, CURB_Y + 14.2, ctz); ctRoof.castShadow = true; group.add(ctRoof);
+  const ctRoof = new THREE.Mesh(new THREE.ConeGeometry(2.4, 2.6, 4), new THREE.MeshStandardMaterial({ color: 0x4a5560, roughness: 0.6, metalness: 0.3 }));
+  ctRoof.rotation.y = Math.PI / 4; ctRoof.position.set(ctx, CURB_Y + 14.3, ctz); ctRoof.castShadow = true; group.add(ctRoof);
 
   // ---- decorative pond in the open mid-quadrant ----
   const pondX = cx - 23, pondZ = cz + 21;
@@ -734,20 +792,10 @@ function buildPlaza(group, plaza, CURB_Y) {
     const top = new THREE.Mesh(new THREE.ConeGeometry(0.36, 0.4, 8), lampPole);
     top.position.set(lx, CURB_Y + 4.75, lz); group.add(top);
   }
-  for (const off of [-27, -13, 13, 27]) { parkLamp(cx + off, cz + 3.2); parkLamp(cx + 3.2, cz + off); }
-
-  // ---- extra benches lining the outer paths (facing the walkway) ----
-  for (const [px, pz, ry] of [
-    [cx - 20, cz - 3.4, 0], [cx + 20, cz - 3.4, 0],
-    [cx - 3.4, cz - 20, Math.PI / 2], [cx - 3.4, cz + 20, Math.PI / 2],
-  ]) {
-    const bench = new THREE.Group();
-    const seat = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.1, 0.5), wood); seat.position.y = 0.46; bench.add(seat);
-    const back = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.5, 0.1), wood); back.position.set(0, 0.73, -0.2); bench.add(back);
-    for (const s of [-0.82, 0.82]) { const lg = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.46, 0.5), metal); lg.position.set(s, 0.23, 0); bench.add(lg); }
-    bench.position.set(px, CURB_Y, pz); bench.rotation.y = ry; bench.traverse((o) => { if (o.isMesh) o.castShadow = true; });
-    group.add(bench);
-  }
+  // four lamps around the roundabout (on the diagonals, between the benches) and
+  // one part-way down each approach spur
+  for (let i = 0; i < 4; i++) { const a = Math.PI / 4 + i * Math.PI / 2; parkLamp(cx + Math.cos(a) * (RING_R + 2.7), cz + Math.sin(a) * (RING_R + 2.7)); }
+  for (const [ox, oz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { parkLamp(cx + ox * (RING_R + 10) + oz * 2.2, cz + oz * (RING_R + 10) + ox * 2.2); }
 
   // ---- low decorative perimeter railing (gaps at the 4 path entrances) ----
   const railMat = new THREE.MeshStandardMaterial({ color: 0x30363d, roughness: 0.5, metalness: 0.55 });
@@ -774,6 +822,19 @@ function buildPlaza(group, plaza, CURB_Y) {
     railRun(cz - railHalf, cz - gap, cx + side * railHalf, false);
     railRun(cz + gap, cz + railHalf, cx + side * railHalf, false);
   }
+
+  return { clockHands };
+}
+
+// Advance the clock-tower hands to the in-game time. timeOfDay 0 = dawn (06:00),
+// so hour = todHours + 6. Hands rotate clockwise (negative about the face's +z).
+function updateClock(clockHands, timeOfDay) {
+  if (!clockHands) return;
+  const hours = (timeOfDay * 24 + 6) % 24;
+  const minFrac = (timeOfDay * 24) % 1;             // 0..1 within the hour
+  const minA = -minFrac * Math.PI * 2;
+  const hourA = -(((hours % 12) + minFrac) / 12) * Math.PI * 2;
+  for (const c of clockHands) { c.hour.rotation.z = hourA; c.minute.rotation.z = minA; }
 }
 
 // Minimal geometry merge for flat marking planes (position + uv only).

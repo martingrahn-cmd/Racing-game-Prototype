@@ -630,7 +630,7 @@ function loop(now) {
   const kmh = updateCamera(dt, perfTime, st);
   if (WORLD) {
     signals.update(dt);
-    if (worldGeom) worldGeom.updateDoors(dt, st ? st.pos : null);
+    if (worldGeom) { worldGeom.updateDoors(dt, st ? st.pos : null); worldGeom.updateClock(daynight.params.timeOfDay); }
     if (worldCollision) worldCollision.update(dt, st ? st.pos : null);
     worldTraffic.update(dt, st ? st.pos : null);
     if (pedestrians) pedestrians.update(dt, st ? st.pos : null);
