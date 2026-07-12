@@ -6,11 +6,14 @@ Levande dokument. Nordstjärna för bygget av den fria staden. Uppdateras allt e
 > med fri körning, gatunät med korsningar, nära-sidans trafikljus per korsning (synkade),
 > upphöjda trottoarer, glas/betong-hus med varierade fasader och entréer, rivbara stolpar,
 > och ett **centralt torg** (fontän, staty, träd, gungställning). Rutnäts-medveten krock.
-> **Fas 3 byggd:** biltrafik (`traffic_world.js`) som ruttar rutnätet, håller körfält,
-> stannar för rött, svänger i korsningar, följer bilen framför och bromsar för spelaren —
-> med bromsljus. Nästa: Fas 4 (fotgängare). Moduler: `citymodel.js` (grid-data),
-> `world.js` (geometri + torg), `signals.js` (ljus per korsning), `traffic_world.js`
-> (biltrafik), `collision.js` (krock); fri körning bakom `world`-flaggan i `drive.js`.
+> **Fas 3 byggd:** biltrafik (`traffic_world.js`) med de riktiga GLB-bilmodellerna
+> (taxi/sedan/SUV/sport/polis) som ruttar rutnätet, stannar för rött, följer och bromsar
+> för spelaren — med bromsljus. **Fas 4 byggd:** fotgängare (`pedestrians_world.js`) —
+> animerade karaktärer som strosar kvarterens trottoarer och **väjer för bilen** istället
+> för att bli överkörda. Nästa: Fas 5 (distrikt-variation + detaljpass). Moduler:
+> `citymodel.js` (grid-data), `world.js` (geometri + torg), `signals.js` (ljus),
+> `traffic_world.js` (bilar), `pedestrians_world.js` (folk), `collision.js` (krock);
+> fri körning bakom `world`-flaggan i `drive.js`.
 
 > Kort: bilen är idag fastlimmad vid en spline (banan). Öppen värld = ta bort den
 > klämman och ersätta med **gatunät + krockhantering**. Allt annat (trafikljus,
