@@ -21,6 +21,7 @@ import { createCollision } from './collision.js';
 import { createWorldTraffic } from './traffic_world.js';
 import { createPedestrians } from './pedestrians_world.js';
 import { createProps } from './props_world.js';
+import { createMissions } from './missions.js';
 import GUI from '../vendor/lil-gui.module.min.js';
 
 // ?world=1 → open-world free-roam slice (Phase 1). Default = the race circuit.
@@ -90,7 +91,7 @@ const skidmarks = createSkidmarks(scene);
 
 let curve = null, length = 0, cornerSpans = null;
 let extras = null, traffic = null, minimap = null, signals = null, worldTraffic = null, pedestrians = null, drive;
-let worldModel = null, worldAttract = false, worldCollision = null, worldGeom = null;
+let worldModel = null, worldAttract = false, worldCollision = null, worldGeom = null, missions = null;
 if (WORLD) {
   const model = createCityModel();
   worldModel = model; worldAttract = true;
@@ -100,6 +101,7 @@ if (WORLD) {
   worldTraffic = createWorldTraffic(scene, model, signals);
   pedestrians = createPedestrians(scene, model, signals);
   const props = createProps(scene, model);
+  missions = createMissions(scene, model);
   const collision = createCollision(model, {
     buildings: worldObj.colliders.buildings,
     obstacles: [...worldObj.obstacles, ...signals.obstacles, ...props.obstacles],
@@ -158,7 +160,7 @@ const GAME_FILES = [
   'src/audio.js', 'src/smoke.js', 'src/skidmarks.js', 'src/daynight.js',
   'src/night.js', 'src/minimap.js',
   'src/citymodel.js', 'src/world.js', 'src/signals.js', 'src/collision.js',
-  'src/traffic_world.js', 'src/pedestrians_world.js', 'src/props_world.js',
+  'src/traffic_world.js', 'src/pedestrians_world.js', 'src/props_world.js', 'src/missions.js',
   'vendor/three.module.js', 'vendor/lil-gui.module.min.js',
   'vendor/loaders/GLTFLoader.js', 'vendor/loaders/DRACOLoader.js',
   'vendor/utils/BufferGeometryUtils.js', 'vendor/utils/SkeletonUtils.js',
@@ -628,6 +630,7 @@ function loop(now) {
     if (worldCollision) worldCollision.update(dt, st ? st.pos : null);
     worldTraffic.update(dt, st ? st.pos : null);
     if (pedestrians) pedestrians.update(dt, st ? st.pos : null);
+    if (missions) missions.update(dt, st);
   } else {
     extras.update(dt);
     traffic.update(dt);
