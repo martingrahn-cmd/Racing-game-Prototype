@@ -22,6 +22,7 @@ import { createWorldTraffic } from './traffic_world.js';
 import { createPedestrians } from './pedestrians_world.js';
 import { createProps } from './props_world.js';
 import { createMissions } from './missions.js';
+import { createWorldMap } from './worldmap.js';
 import GUI from '../vendor/lil-gui.module.min.js';
 
 // ?world=1 → open-world free-roam slice (Phase 1). Default = the race circuit.
@@ -92,6 +93,7 @@ const skidmarks = createSkidmarks(scene);
 let curve = null, length = 0, cornerSpans = null;
 let extras = null, traffic = null, minimap = null, signals = null, worldTraffic = null, pedestrians = null, drive;
 let worldModel = null, worldAttract = false, worldCollision = null, worldGeom = null, missions = null;
+let props = null, worldMap = null;
 if (WORLD) {
   const model = createCityModel();
   worldModel = model; worldAttract = true;
@@ -100,8 +102,9 @@ if (WORLD) {
   signals = createSignals(scene, model);
   worldTraffic = createWorldTraffic(scene, model, signals);
   pedestrians = createPedestrians(scene, model, signals);
-  const props = createProps(scene, model);
+  props = createProps(scene, model);
   missions = createMissions(scene, model);
+  worldMap = createWorldMap(model);
   const collision = createCollision(model, {
     buildings: worldObj.colliders.buildings,
     obstacles: [...worldObj.obstacles, ...signals.obstacles, ...props.obstacles],
@@ -109,7 +112,6 @@ if (WORLD) {
   worldCollision = collision;
   drive = createDrive(null, 0, { world: { spawn: model.spawn, collision, curbY: model.CURB_Y, ramps: worldObj.ramps } });
   scene.fog.near = 110; scene.fog.far = 560; // atmospheric fade at the district edge
-  const mm = document.getElementById('minimap'); if (mm) mm.style.display = 'none';
 } else {
   ({ curve, length, cornerSpans } = buildTrack(scene));
   buildCity(scene, curve, length);
@@ -137,7 +139,8 @@ const gui = new GUI({ title: 'APEX DEBUG' });
   fDrive.add(TUNE, 'grip', 2, 12, 0.1).name('grepp');
   fDrive.add(TUNE, 'driftGrip', 0.4, 4, 0.1).name('sladdgrepp');
   fDrive.add(TUNE, 'steer', 1, 4, 0.05).name('styrutslag');
-  fDrive.add(TUNE, 'sidewalkMax', 3, 20, 0.5).name('trottoar max m/s');
+  fDrive.add(TUNE, 'steerResponse', 3, 14, 0.5).name('styr-respons');
+  fDrive.add(TUNE, 'sidewalkMax', 3, 50, 0.5).name('trottoar max m/s');
   gui.hide();
 }
 let guiVisible = false;
@@ -161,6 +164,7 @@ const GAME_FILES = [
   'src/night.js', 'src/minimap.js',
   'src/citymodel.js', 'src/world.js', 'src/signals.js', 'src/collision.js',
   'src/traffic_world.js', 'src/pedestrians_world.js', 'src/props_world.js', 'src/missions.js',
+  'src/worldmap.js',
   'vendor/three.module.js', 'vendor/lil-gui.module.min.js',
   'vendor/loaders/GLTFLoader.js', 'vendor/loaders/DRACOLoader.js',
   'vendor/utils/BufferGeometryUtils.js', 'vendor/utils/SkeletonUtils.js',
@@ -590,7 +594,7 @@ const elCam = document.getElementById('camName');
 const elPrompt = document.getElementById('prompt');
 const elCoords = document.getElementById('coords');
 const elHint = document.getElementById('hint');
-const HINT_KEYS = '[↑↓←→/WASD] KÖR  ·  [SPACE] HANDBROMS  ·  [B] BAKÅT  ·  [H] TUTA  ·  [R] RESET  ·  [P] FOTO  ·  [C] KAMERA  ·  [G] DEBUG';
+const HINT_KEYS = '[↑↓←→/WASD] KÖR  ·  [SPACE] HANDBROMS  ·  [B] BAKÅT  ·  [H] TUTA  ·  [R] RESET  ·  [P] FOTO  ·  [C] KAMERA  ·  ' + (WORLD ? '[M] KARTA  ·  ' : '') + '[G] DEBUG';
 const HINT_PAD = '[RT] GAS  ·  [LT] BROMS  ·  [A] HANDBROMS  ·  [B] BAKÅT  ·  [X] TUTA  ·  [SELECT] RESET  ·  [Y] KAMERA';
 const CAM_NAMES = ['CHASE', 'BUMPER', 'HELI', 'TV', 'PHOTO'];
 const ATTRACT_PROMPT = 'GASA FÖR ATT KÖRA — ↑ / W ELLER RT PÅ HANDKONTROLL';
@@ -630,7 +634,9 @@ function loop(now) {
     if (worldCollision) worldCollision.update(dt, st ? st.pos : null);
     worldTraffic.update(dt, st ? st.pos : null);
     if (pedestrians) pedestrians.update(dt, st ? st.pos : null);
+    if (props) props.update(dt, st ? st.pos : null, st ? st.heading : null, st ? st.speed : 0);
     if (missions) missions.update(dt, st);
+    if (worldMap) worldMap.update(st ? st.pos : carGround, st ? st.yaw : worldModel.spawn.yaw, missions.dbg());
   } else {
     extras.update(dt);
     traffic.update(dt);

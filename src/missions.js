@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 
 const PICKUP_R = 6, DROP_R = 6.5;
+const PICKUP_KMH = 12;   // must be nearly stopped in the ring to grab the package
 const BASE_PAY = 150;
 
 // dispatcher beats, keyed by how many deliveries you've completed
@@ -16,16 +17,19 @@ const DISPATCH = [
   [10, 'DISPATCH: Stort ikväll. En flyktbil väntar. Du är med — eller hur?'],
 ];
 
+// A flat ground marker (no sky-high light pillar — that fought the map-reading
+// feel). Two concentric rings on the tarmac that gently pulse so you can spot
+// the target without a beam blotting out the city.
 function makeBeacon(color) {
   const group = new THREE.Group();
-  const pMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false });
-  const pillar = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 46, 16, 1, true), pMat);
-  pillar.position.y = 23; group.add(pillar);
   const rMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
-  const ring = new THREE.Mesh(new THREE.RingGeometry(2.6, 3.4, 28), rMat);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(2.6, 3.4, 32), rMat);
   ring.rotation.x = -Math.PI / 2; ring.position.y = 0.12; group.add(ring);
+  const discMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+  const disc = new THREE.Mesh(new THREE.CircleGeometry(2.5, 32), discMat);
+  disc.rotation.x = -Math.PI / 2; disc.position.y = 0.1; group.add(disc);
   group.visible = false;
-  return { group, pulse: (t) => { const s = 1 + Math.sin(t * 3) * 0.16; ring.scale.set(s, s, 1); pMat.opacity = 0.22 + (Math.sin(t * 3) * 0.5 + 0.5) * 0.18; } };
+  return { group, pulse: (t) => { const s = 1 + Math.sin(t * 3) * 0.16; ring.scale.set(s, s, 1); discMat.opacity = 0.1 + (Math.sin(t * 3) * 0.5 + 0.5) * 0.12; } };
 }
 
 function panel(css) { const d = document.createElement('div'); d.style.cssText = 'position:fixed;font-family:"DejaVu Sans Mono",monospace;color:#fff;pointer-events:none;z-index:40;text-shadow:0 2px 6px #000;' + css; document.body.appendChild(d); return d; }
@@ -94,8 +98,13 @@ export function createMissions(scene, model) {
       styleEl.textContent = style > 0.05 ? `STYLE x${(1 + style).toFixed(1)}` : '';
 
       if (state === 'idle') {
-        obj.innerHTML = `📦 HÄMTA PAKETET &nbsp;·&nbsp; ${Math.round(t2(p, pickup))} m`;
-        if (t2(p, pickup) < PICKUP_R) startDelivery();
+        const dist = t2(p, pickup);
+        const inRing = dist < PICKUP_R;
+        // you have to actually STOP for the package — no grabbing it at 200 km/h
+        const slow = st.kmh < PICKUP_KMH;
+        if (inRing && !slow) obj.innerHTML = `📦 SAKTA IN OCH STANNA &nbsp;·&nbsp; <span style="color:#ffd94a">${Math.round(st.kmh)} km/h</span>`;
+        else obj.innerHTML = `📦 HÄMTA PAKETET &nbsp;·&nbsp; ${Math.round(dist)} m`;
+        if (inRing && slow) startDelivery();
       } else {
         timer -= dt;
         const m = Math.floor(timer / 60), s = Math.max(0, Math.floor(timer % 60));

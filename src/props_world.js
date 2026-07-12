@@ -47,6 +47,9 @@ const TINT = {
   bicycle: [0xb63a34, 0x2f6fb0, 0x2f8f6f, 0xd7a12b, 0x24272c, 0xe8e2d4, 0x6a4a8f, 0xc0552f],
   bench: [0x6a4a2f, 0x3d5c48, 0x41546e, 0x5a5a5a, 0x7a3a30, 0x4a4e54],
 };
+// light "loose" props that go flying when you plough into them (the rest —
+// trees, statues, bus shelters, phone booths — stay bolted down).
+const LOOSE = new Set(['bench', 'bicycle', 'cone', 'barrier', 'trash', 'meter', 'hydrant', 'bush', 'flowers']);
 
 // merge geometries sharing a material: keep position + normal + uv + vertex
 // colour (zero-fill uv / white-fill colour where a sub-mesh lacks it) so both
@@ -197,6 +200,8 @@ export function createProps(scene, model) {
   }
 
   // ---- load each prop GLB and build its instanced sets ----
+  const looseGroups = [];   // {ims:[InstancedMesh], objs:[flying state]} for knock-flying props
+  const CAR_R = 1.7;
   const loader = makeGLTFLoader();
   for (const [key, list] of Object.entries(spots)) {
     if (!list.length || !PROPS[key]) continue;
@@ -205,6 +210,7 @@ export function createProps(scene, model) {
     const cols = TINT[key] ? list.map(() => new THREE.Color(pick(TINT[key]))) : null;
     loader.load(cfg.file, (gltf) => {
       const parts = prepGLB(gltf, cfg.h, cfg.yaw);
+      const partIms = [];
       for (const part of parts) {
         const im = new THREE.InstancedMesh(part.geometry, part.material, list.length);
         im.castShadow = true;
@@ -217,10 +223,80 @@ export function createProps(scene, model) {
           if (cols) im.setColorAt(i, cols[i]);
         }
         if (im.instanceColor) im.instanceColor.needsUpdate = true;
+        partIms.push(im);
         group.add(im);
+      }
+      if (LOOSE.has(key)) {
+        const r = key === 'bench' ? 1.5 : key === 'barrier' ? 1.3 : key === 'bicycle' ? 1.1
+          : (key === 'hydrant' || key === 'cone') ? 0.7 : 0.95;
+        const hit2 = (CAR_R + r) * (CAR_R + r);
+        for (const im of partIms) im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        looseGroups.push({
+          ims: partIms,
+          objs: list.map((it, i) => ({ i, x: it.x, z: it.z, yaw: it.yaw, hit2, launched: false, rested: false })),
+        });
       }
     }, undefined, () => { /* skip a prop that fails to load */ });
   }
 
-  return { group, obstacles: [] };
+  // Loose props go flying when the car ploughs through them: launch along the
+  // car's travel with an outward kick + tumble, fall under gravity, bounce a
+  // couple of times, then rest where they landed. Once you're well away they
+  // quietly reset (like the toppling poles) so the city repairs itself.
+  const GRAV = 24;
+  const _M = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _p = new THREE.Vector3(), _one = new THREE.Vector3(1, 1, 1);
+  function restMatrix(o, out) { _e.set(0, o.yaw, 0); _q.setFromEuler(_e); _p.set(o.x, CURB_Y, o.z); return out.compose(_p, _q, _one); }
+
+  function update(dt, playerPos, heading, speed) {
+    for (const grp of looseGroups) {
+      let dirty = false;
+      for (const o of grp.objs) {
+        if (!o.launched) {
+          if (playerPos && speed > 3) {
+            const dx = o.x - playerPos.x, dz = o.z - playerPos.z;
+            if (dx * dx + dz * dz < o.hit2) {
+              const dl = Math.hypot(dx, dz) || 1, nx = dx / dl, nz = dz / dl;
+              const hx = heading ? heading.x : nx, hz = heading ? heading.z : nz;
+              o.launched = true; o.rested = false; o.bounce = 0;
+              o.px = o.x; o.py = CURB_Y + 0.4; o.pz = o.z;
+              o.vx = hx * speed * 0.7 + nx * (speed * 0.4 + 2);
+              o.vz = hz * speed * 0.7 + nz * (speed * 0.4 + 2);
+              o.vy = Math.min(speed * 0.5, 9) + 3;
+              o.rx = 0; o.ry = o.yaw; o.rz = 0;
+              o.wx = ((o.i * 13) % 9 - 4) * 2.3; o.wy = ((o.i * 7) % 9 - 4) * 2.0; o.wz = ((o.i * 17) % 9 - 4) * 2.3;
+              dirty = true;
+            }
+          }
+        } else if (!o.rested) {
+          o.vy -= GRAV * dt;
+          o.px += o.vx * dt; o.py += o.vy * dt; o.pz += o.vz * dt;
+          o.vx *= (1 - 0.8 * dt); o.vz *= (1 - 0.8 * dt);
+          o.rx += o.wx * dt; o.ry += o.wy * dt; o.rz += o.wz * dt;
+          if (o.py <= CURB_Y + 0.05) {
+            if (o.vy < -5 && o.bounce < 2) {
+              o.bounce++; o.py = CURB_Y + 0.05; o.vy = -o.vy * 0.42;
+              o.vx *= 0.55; o.vz *= 0.55; o.wx *= 0.6; o.wy *= 0.6; o.wz *= 0.6;
+            } else {
+              o.rested = true; o.py = CURB_Y + 0.05; o.vx = o.vz = o.vy = 0;
+            }
+          }
+          _e.set(o.rx, o.ry, o.rz); _q.setFromEuler(_e); _p.set(o.px, o.py, o.pz);
+          _M.compose(_p, _q, _one);
+          for (const im of grp.ims) im.setMatrixAt(o.i, _M);
+          dirty = true;
+        } else {
+          const far = !playerPos || ((o.x - playerPos.x) ** 2 + (o.z - playerPos.z) ** 2) > 8100; // 90 m
+          if (far) {
+            o.launched = false; o.rested = false;
+            restMatrix(o, _M);
+            for (const im of grp.ims) im.setMatrixAt(o.i, _M);
+            dirty = true;
+          }
+        }
+      }
+      if (dirty) for (const im of grp.ims) im.instanceMatrix.needsUpdate = true;
+    }
+  }
+
+  return { group, obstacles: [], update };
 }
