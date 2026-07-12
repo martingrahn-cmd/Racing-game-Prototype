@@ -1,8 +1,8 @@
 // Open-world pedestrians. The character models skin incorrectly under a live
 // AnimationMixer (the cloned pose spreads and renders invisible), so instead we
-// BAKE a few frames of the walk cycle into static geometry (the technique the
+// BAKE several frames of the walk cycle into static geometry (the technique the
 // race crowd uses and which renders correctly) and flip between them — a cheap,
-// robust 4-frame walk that needs no per-frame skinning. Pedestrians stroll the
+// robust 8-frame walk that needs no per-frame skinning. Pedestrians stroll the
 // block sidewalks and dodge the player's car rather than being run over.
 import * as THREE from 'three';
 import * as SkeletonUtils from '../vendor/utils/SkeletonUtils.js';
@@ -15,7 +15,9 @@ const MODELS = [
 ];
 const WALK = 1.25;      // m/s
 const DODGE_R = 5.5;
-const FRAMES = [0.05, 0.3, 0.55, 0.8]; // walk-cycle sample points (fraction of clip)
+// walk-cycle sample points (fraction of clip). More frames → smoother stride
+// (4 frames read as puppet-theatre); 8 evenly-spaced samples give a fluid loop.
+const FRAMES = [0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875];
 
 // bake a posed skinned mesh into static world-space geometry (~1.72 m tall,
 // feet at y=0, centred). Returns [{geometry, material}].

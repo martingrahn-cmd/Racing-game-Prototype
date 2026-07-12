@@ -1,12 +1,14 @@
 // Open-world traffic: AI cars that route the street grid, keep to their lane,
 // stop at red lights, turn at intersections, follow the car ahead, and brake
 // for the player. Uses the real GLB car models (with a procedural box as an
-// instant placeholder until each model streams in). Working brake lights.
+// instant placeholder until each model streams in). Each car gets a random
+// paint colour and drives the model's OWN built-in tail/head-light materials
+// (glow on braking / at night) — no bolted-on light boxes.
 //
 // Lane convention matches the player spawn: travelling +z runs in the x=node-LANE
 // lane, so same-direction traffic is followed, oncoming traffic is on the far side.
 import * as THREE from 'three';
-import { registerEmissive, getDayness } from './night.js';
+import { getDayness } from './night.js';
 import { makeGLTFLoader, rigWheels } from './car.js';
 
 const CRUISE = 11;          // m/s ≈ 40 km/h
@@ -19,6 +21,11 @@ const MODELS = [
 ];
 const PALETTE = [0xb63a34, 0x2f6fb0, 0xd7d7cf, 0x353b42, 0xd7a12b, 0x2f8f6f, 0x8a8f96, 0x6a4a8f];
 const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+// realistic per-car paint colours (the body material is the colour-named one)
+const CAR_PAINTS = [0xdedede, 0x9aa0a6, 0x24272c, 0xb63a34, 0x2f5aa0, 0x1b3450, 0x36664c, 0xbcae92, 0x7a1f1f, 0xf0f0f0, 0x4a4e54, 0x6a4a8f];
+// the body panel is the ONE colour-named material on each model (Blue/White/…);
+// everything else (Windows, Black, Grey, Headlights, TailLights) is trim we keep.
+const BODY_NAMES = new Set(['blue', 'lightblue', 'white', 'orange', 'darkorange', 'yellow', 'red', 'green']);
 
 // procedural box car — instant placeholder before the GLB streams in
 function makePlaceholder(color) {
@@ -51,11 +58,6 @@ export function createWorldTraffic(scene, model, signals, count = 14) {
     if (straight && Math.random() < 0.55) return straight;
     return opts[Math.floor(Math.random() * opts.length)];
   }
-
-  // shared night-on headlight material for the streamed models
-  const headMat = new THREE.MeshStandardMaterial({ color: 0x222018, emissive: 0xfff2cc, emissiveIntensity: 0.15 });
-  registerEmissive(headMat, 0.0, 1.9);
-  const lightGeo = new THREE.BoxGeometry(0.3, 0.14, 0.08);
 
   const cars = [];
   for (let k = 0; k < count; k++) {
@@ -100,23 +102,38 @@ export function createWorldTraffic(scene, model, signals, count = 14) {
     mdl.position.x -= c.x / scale;
     mdl.position.z -= c.z / scale;
     mdl.position.y -= b2.min.y / scale;
+    // The Quaternius cars already model their own headlights and tail lights as
+    // named materials — don't bolt on extra light boxes. Instead: give each car a
+    // fresh paint colour (except the taxi/cop, whose liveries are their identity)
+    // and clone their built-in light materials so we can glow them at night / on
+    // braking without every car of the same model lighting up together.
+    const paint = CAR_PAINTS[Math.floor(Math.random() * CAR_PAINTS.length)];
+    const liveried = car.mi === 0 || car.mi === MODELS.length - 1; // taxi, cop
     holder.traverse((o) => {
-      if (o.isMesh) {
-        o.castShadow = true;
-        const mats = Array.isArray(o.material) ? o.material : [o.material];
-        mats.forEach((m) => { if (m.isMeshStandardMaterial) m.envMapIntensity = 0.45; });
-      }
+      if (!o.isMesh) return;
+      o.castShadow = true;
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      const out = mats.map((m) => {
+        if (!m || !m.isMeshStandardMaterial) return m;
+        const name = m.name || '';
+        if (/tail/i.test(name)) {
+          const t = m.clone(); t.emissive = new THREE.Color(0xff2200); t.emissiveIntensity = 0.35;
+          car.tailMat = t; return t;
+        }
+        if (/head/i.test(name)) {
+          const h = m.clone(); h.emissive = new THREE.Color(0xfff2cc); h.emissiveIntensity = 0;
+          car.headMat = h; return h;
+        }
+        m.envMapIntensity = 0.5;
+        if (!liveried && BODY_NAMES.has(name.toLowerCase())) {
+          const c = m.clone(); c.color = new THREE.Color(paint); c.envMapIntensity = 0.5; return c;
+        }
+        return m;
+      });
+      o.material = Array.isArray(o.material) ? out : out[0];
     });
     car.group.remove(car.placeholder);
     car.group.add(holder);
-    // brake + head lights go on the UNSCALED container (not the scaled holder,
-    // which would multiply their offsets and fling them off the car)
-    const tailMat = new THREE.MeshStandardMaterial({ color: 0x330000, emissive: 0xff2200, emissiveIntensity: 0.4 });
-    for (const sx of [-0.55, 0.55]) {
-      const tl = new THREE.Mesh(lightGeo, tailMat); tl.position.set(sx, 0.62, -2.05); car.group.add(tl);
-      const hl = new THREE.Mesh(lightGeo, headMat); hl.position.set(sx, 0.62, 2.05); car.group.add(hl);
-    }
-    car.tailMat = tailMat;
     car.rig = { spinNodes: rig.spinNodes, radius: rig.radius * scale, forwardSign: rig.forwardSign };
     car.applied = true;
   }
@@ -173,7 +190,8 @@ export function createWorldTraffic(scene, model, signals, count = 14) {
         while (dy < -Math.PI) dy += Math.PI * 2;
         car.yaw += dy * Math.min(1, 8 * dt);
         car.group.rotation.y = car.yaw;
-        car.tailMat.emissiveIntensity = (braking || car.speed < 0.5 ? 3.2 : 0.35) + night * 0.9;
+        if (car.tailMat) car.tailMat.emissiveIntensity = (braking || car.speed < 0.5 ? 3.2 : 0.35) + night * 0.9;
+        if (car.headMat) car.headMat.emissiveIntensity = night * 1.6;
         if (car.rig) {
           const spin = car.speed * dt / car.rig.radius * car.rig.forwardSign;
           for (const w of car.rig.spinNodes) w.rotation.x += spin;
