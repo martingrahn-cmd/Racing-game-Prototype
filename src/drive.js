@@ -13,13 +13,13 @@ const MAX_REVERSE = 9;
 
 // handling parameters, exposed so the debug GUI can tune them live
 export const TUNE = {
-  accel: 13.5,
-  brakeForce: 24,
-  grip: 6.5,
-  driftGrip: 1.8,   // more bite in the slide = a heavier, less floaty drift
-  steer: 2.4,
+  accel: 30,
+  brakeForce: 30,
+  grip: 11.1,
+  driftGrip: 4,     // more bite in the slide = a heavier, less floaty drift
+  steer: 3,
   driftSteer: 1.6,
-  sidewalkMax: 8.3, // m/s ≈ 30 km/h — sidewalks are a slow crawl, never a route
+  sidewalkMax: 20,  // m/s — dialled-in feel from the debug panel
 };
 
 export function createDrive(curve, length, opts = {}) {
