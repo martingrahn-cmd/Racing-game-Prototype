@@ -9,6 +9,7 @@ import {
   makeFacadeGlass, makeFacadeRibbon, makeFacadeResidential,
 } from './textures.js';
 import { registerEmissive, registerOpacity } from './night.js';
+import { makeGLTFLoader } from './car.js';
 
 function makeAsphalt() {
   const c = document.createElement('canvas');
@@ -119,7 +120,11 @@ export function buildWorld(scene, model) {
   const tints = [0xdfe9f2, 0xe9e2d2, 0xd2e6ec, 0xf0ebe0];
   const awnings = [0x8a3f39, 0x3d5c48, 0x41546e, 0x7a6a4a];
 
+  const aptSpots = [];
   model.buildings.forEach((b, i) => {
+    // residential blocks are lined with real GLB apartment buildings instead of
+    // one procedural mass — collect their placements, build them in one pass below
+    if (b.category === 'residential') { collectApartments(b, aptSpots); return; }
     const w = b.maxX - b.minX, d = b.maxZ - b.minZ, h = b.height;
     const cx = b.cx, cz = b.cz;
     const f = facades[b.kind];
@@ -167,6 +172,7 @@ export function buildWorld(scene, model) {
   });
 
   if (model.plaza) buildPlaza(group, model.plaza, CURB_Y);
+  buildApartments(group, aptSpots, CURB_Y);
   buildStreetLamps(group, model);
 
   // -------------------------------------------------- distant filler
@@ -270,6 +276,51 @@ function buildStreetLamps(group, model) {
     dark.setMatrixAt(i, M); head.setMatrixAt(i, M); pool.setMatrixAt(i, M);
   }
   group.add(dark); group.add(head); group.add(pool);
+}
+
+// A residential block is ringed with apartment buildings facing the streets.
+// Collect one placement per apartment slot (back to the block edge, front out).
+function collectApartments(b, out) {
+  const W = 11.5;   // apartment footprint width along the street
+  const OFF = 3.6;  // half-depth: sit the back at the block edge
+  const edges = [
+    { horiz: true, fix: b.minZ + OFF, a: b.minX, len: b.maxX - b.minX, yaw: Math.PI },      // south → face -z
+    { horiz: true, fix: b.maxZ - OFF, a: b.minX, len: b.maxX - b.minX, yaw: 0 },            // north → face +z
+    { horiz: false, fix: b.minX + OFF, a: b.minZ, len: b.maxZ - b.minZ, yaw: -Math.PI / 2 }, // west  → face -x
+    { horiz: false, fix: b.maxX - OFF, a: b.minZ, len: b.maxZ - b.minZ, yaw: Math.PI / 2 },  // east  → face +x
+  ];
+  for (const e of edges) {
+    const usable = e.len - 2 * OFF;                 // leave the corners for the perpendicular rows
+    const n = Math.max(1, Math.round(usable / W));
+    for (let i = 0; i < n; i++) {
+      const along = e.a + OFF + usable * ((i + 0.5) / n);
+      out.push({ x: e.horiz ? along : e.fix, z: e.horiz ? e.fix : along, yaw: e.yaw });
+    }
+  }
+}
+
+// Normalise a building GLB (scale so its footprint width is `targetW`, feet at 0,
+// centred) and instance it at every placement. One InstancedMesh per source mesh.
+function buildApartments(group, spots, CURB_Y) {
+  if (!spots.length) return;
+  const loader = makeGLTFLoader();
+  loader.load('assets/poly/apt1.glb', (gltf) => {
+    gltf.scene.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(gltf.scene);
+    const size = box.getSize(new THREE.Vector3());
+    const s = 11.5 / Math.max(size.x, size.z);
+    const N = new THREE.Matrix4().makeScale(s, s, s)
+      .multiply(new THREE.Matrix4().makeTranslation(-(box.min.x + box.max.x) / 2, -box.min.y, -(box.min.z + box.max.z) / 2));
+    const parts = [];
+    gltf.scene.traverse((o) => { if (o.isMesh) { const g = o.geometry.clone(); g.applyMatrix4(o.matrixWorld); g.applyMatrix4(N); parts.push({ geometry: g, material: o.material }); } });
+    for (const part of parts) {
+      const im = new THREE.InstancedMesh(part.geometry, part.material, spots.length);
+      im.castShadow = true; im.receiveShadow = true;
+      const M = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
+      for (let i = 0; i < spots.length; i++) { q.setFromAxisAngle(up, spots[i].yaw); p.set(spots[i].x, CURB_Y, spots[i].z); M.compose(p, q, one); im.setMatrixAt(i, M); }
+      group.add(im);
+    }
+  }, undefined, () => { /* keep the block empty if the model fails to load */ });
 }
 
 // Merge indexed geometries keeping position + normal (for untextured props).

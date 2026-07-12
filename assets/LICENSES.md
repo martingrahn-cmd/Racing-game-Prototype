@@ -57,3 +57,9 @@ Hämtade via [Poly Pizza](https://poly.pizza). CC0-modeller är fria; CC-BY krä
 | `poly/tree2.glb` | Tree-2 | Marc Solà | CC-BY 3.0 | https://poly.pizza/m/cRipmFHCEVU |
 | `poly/pine.glb` | Pine | Quaternius | CC0 1.0 | https://poly.pizza/m/igSu0cPoBz |
 | `poly/oak.glb` | Tree | Quaternius | CC0 1.0 | https://poly.pizza/m/qZtx0AHhcy |
+| `poly/apt1.glb` | Apartment building | Poly by Google | CC-BY 3.0 | https://poly.pizza/m/01lqee-dZAr |
+| `poly/tower1.glb` | Skyscraper | Kenney | CC0 1.0 | https://poly.pizza/m/XST1j6kYsL |
+| `poly/tower2.glb` | Skyscraper | Kenney | CC0 1.0 | https://poly.pizza/m/obYD8hWLTZ |
+| `poly/house1.glb` | Two story house | Kenney | CC0 1.0 | https://poly.pizza/m/hmXhiLDf8D |
+| `poly/villa1.glb` | Villa | Steren Giannini | CC-BY 3.0 | https://poly.pizza/m/1ogbmmlgzjv |
+| `poly/house2.glb` | Small Building | Kenney | CC0 1.0 | https://poly.pizza/m/Rq572hdKEz |

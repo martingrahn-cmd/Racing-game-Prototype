@@ -33,7 +33,8 @@ const PROPS = {
   pine:       { file: P + 'pine.glb',       h: 7.5,  yaw: 0 },
   oak:        { file: P + 'oak.glb',        h: 7.0,  yaw: 0 },
 };
-const TREE_KINDS = ['tree', 'tree2', 'pine', 'oak'];
+const STREET_TREES = ['tree', 'tree2', 'oak'];        // broadleaf only on the streets
+const PARK_TREES = ['tree', 'tree2', 'oak', 'pine'];  // pines belong in the park (#58)
 // weighted sidewalk furniture pool (common things repeat). Mailboxes and road
 // signs are held back for now — mailboxes suit a residential district (#45) and
 // signs need real intersection logic (#46) before they belong on a corner.
@@ -45,25 +46,30 @@ const TINT = {
   bench: [0x6a4a2f, 0x3d5c48, 0x41546e, 0x5a5a5a, 0x7a3a30, 0x4a4e54],
 };
 
-// merge geometries sharing a material: keep position + normal + uv (zero-fill uv
-// where a sub-mesh has none) so textured props survive instancing.
+// merge geometries sharing a material: keep position + normal + uv + vertex
+// colour (zero-fill uv / white-fill colour where a sub-mesh lacks it) so both
+// textured AND vertex-coloured props survive instancing (else the latter — pine,
+// oak — render black once their COLOR_0 attribute is dropped).
 function mergeGroup(geos) {
   const g = geos.map((x) => (x.index ? x.toNonIndexed() : x));
   let vc = 0; for (const x of g) vc += x.attributes.position.count;
+  let colSize = 0; for (const x of g) { if (x.attributes.color) { colSize = x.attributes.color.itemSize; break; } }
   const pos = new Float32Array(vc * 3), nor = new Float32Array(vc * 3), uv = new Float32Array(vc * 2);
+  const col = colSize ? new Float32Array(vc * colSize) : null;
   let o = 0;
   for (const x of g) {
-    const A = x.attributes.position;
+    const A = x.attributes.position, n = A.count;
     let N = x.attributes.normal; if (!N) { x.computeVertexNormals(); N = x.attributes.normal; }
-    const U = x.attributes.uv;
     pos.set(A.array, o * 3); nor.set(N.array, o * 3);
-    if (U) uv.set(U.array, o * 2);
-    o += A.count;
+    if (x.attributes.uv) uv.set(x.attributes.uv.array, o * 2);
+    if (col) { if (x.attributes.color) col.set(x.attributes.color.array, o * colSize); else col.fill(1, o * colSize, (o + n) * colSize); }
+    o += n;
   }
   const out = new THREE.BufferGeometry();
   out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   out.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
   out.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  if (col) out.setAttribute('color', new THREE.BufferAttribute(col, colSize));
   return out;
 }
 
@@ -104,7 +110,7 @@ export function createProps(scene, model) {
   const busStops = [];                     // keep trees clear of shelters
   const treeSpots = [];                    // for dirt rings
   const near = (list, x, z, r) => list.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < r * r);
-  const addTree = (x, z) => { add(pick(TREE_KINDS), x, z, rnd() * 6.28); treeSpots.push({ x, z }); };
+  const addTree = (x, z, kinds) => { add(pick(kinds), x, z, rnd() * 6.28); treeSpots.push({ x, z }); };
 
   // ---- sidewalk furniture + bus shelters ----
   const INSET = 1.4, STOP_INSET = 0.7, SP = 8;
@@ -144,9 +150,9 @@ export function createProps(scene, model) {
     for (let j = 0; j < nodes.length; j++) {
       for (const [ox, oz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
         if (rnd() < 0.75) continue;                   // ~25% of corners → about half the old count
-        const x = nodes[i] + ox * (ROAD_HW + 2.4), z = nodes[j] + oz * (ROAD_HW + 2.4);
+        const x = nodes[i] + ox * (ROAD_HW + 1.6), z = nodes[j] + oz * (ROAD_HW + 1.6); // hug the curb, clear of buildings (#59)
         if (near(busStops, x, z, 5)) continue;
-        addTree(x, z);
+        addTree(x, z, STREET_TREES);
       }
     }
   }
@@ -163,7 +169,7 @@ export function createProps(scene, model) {
         tries++;
         const x = cx + (rnd() * 2 - 1) * halfW, z = cz + (rnd() * 2 - 1) * halfD;
         if (!okPark(x, z)) continue;
-        if (k === 'tree') addTree(x, z); else add(k, x, z, rnd() * 6.28);
+        if (k === 'tree') addTree(x, z, PARK_TREES); else add(k, x, z, rnd() * 6.28);
         if (extra) extra(x, z);
         placed++;
       }
