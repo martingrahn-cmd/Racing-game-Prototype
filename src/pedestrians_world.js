@@ -21,6 +21,14 @@ const MODELS = [
   'assets/people/suit.glb', 'assets/people/worker.glb', 'assets/people/bizman.glb',
   'assets/people/woman.glb', 'assets/people/woman2.glb', 'assets/people/woman3.glb',
 ];
+// which character models frequent which district (indices into MODELS above):
+// 0 anne, 1 casual, 2 hoodie, 3 suit, 4 worker, 5 bizman, 6 woman, 7 woman2, 8 woman3
+const ZONE_MODELS = {
+  finance: [3, 3, 5, 5, 7, 8, 6],       // suits & business
+  residential: [1, 1, 2, 2, 0, 6, 6],   // casual
+  villa: [0, 1, 4, 6, 8, 0],            // families / mixed
+  park: [0, 1, 2, 3, 4, 5, 6, 7, 8],    // everyone
+};
 const WALK = 1.25;        // m/s
 const CROSS_RUSH = 1.6;   // people hurry across crosswalks
 const DODGE_R = 5.5;
@@ -132,8 +140,8 @@ function placePicnics(group, model, seated) {
 function buildSidewalkGraph(model) {
   const { SIDEWALK } = model;
   const m = SIDEWALK / 2;
-  const wb = model.buildings.map((b) => ({ bi: b.bi, bj: b.bj, slab: b.slab }));
-  if (model.plaza) wb.push({ bi: model.plaza.bi, bj: model.plaza.bj, slab: model.plaza });
+  const wb = model.buildings.map((b) => ({ bi: b.bi, bj: b.bj, slab: b.slab, cat: b.category }));
+  if (model.plaza) wb.push({ bi: model.plaza.bi, bj: model.plaza.bj, slab: model.plaza, cat: 'park' });
   const grid = {};
   wb.forEach((b, idx) => {
     b.idx = idx;
@@ -185,8 +193,9 @@ function buildSidewalkGraph(model) {
     }
   }
   const pos = (id) => (id >= base ? extra[id - base] : wb[Math.floor(id / 4)].corners[id % 4]);
+  const catOf = (id) => (id >= base ? 'park' : wb[Math.floor(id / 4)].cat || 'residential');
   const nodeCount = base + extra.length;
-  return { edges, pos, nodeCount };
+  return { edges, pos, catOf, nodeCount };
 }
 
 export function createPedestrians(scene, model, signals, count = DAY_CROWD) {
@@ -246,7 +255,10 @@ export function createPedestrians(scene, model, signals, count = DAY_CROWD) {
       for (const parts of seated) for (const part of parts) matte(part.material);
 
       for (let k = 0; k < count; k++) {
-        const fb = flipbooks[k % flipbooks.length];
+        // pick a spawn node, then a character that fits that district
+        const startNode = Math.floor(Math.random() * graph.nodeCount);
+        const zonePool = ZONE_MODELS[graph.catOf(startNode)] || ZONE_MODELS.park;
+        const fb = flipbooks[zonePool[Math.floor(Math.random() * zonePool.length)] % flipbooks.length];
         const container = new THREE.Group();
         const meshes = fb[0].map((part) => {
           const mesh = new THREE.Mesh(part.geometry, part.material);
@@ -258,7 +270,7 @@ export function createPedestrians(scene, model, signals, count = DAY_CROWD) {
         const p = {
           group: container, meshes, fb, nF: fb.length, curFrame: 0,
           phase: Math.random() * fb.length,
-          a: Math.floor(Math.random() * graph.nodeCount), prev: -1,
+          a: startNode, prev: -1,
           b: 0, cross: null, len: 1, t: Math.random(),
           base: WALK * (0.8 + Math.random() * 0.5),
           yaw: Math.random() * Math.PI * 2,
