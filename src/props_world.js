@@ -152,15 +152,27 @@ export function createProps(scene, model) {
     }
   }
 
-  // ---- street trees at intersection corners (halved, varied), clear of shelters ----
-  for (let i = 0; i < nodes.length; i++) {
-    for (let j = 0; j < nodes.length; j++) {
-      for (const [ox, oz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
-        if (rnd() < 0.75) continue;                   // ~25% of corners → about half the old count
-        const x = nodes[i] + ox * (ROAD_HW + 1.6), z = nodes[j] + oz * (ROAD_HW + 1.6); // hug the curb, clear of buildings (#59)
-        if (near(busStops, x, z, 5)) continue;
-        addTree(x, z, STREET_TREES);
-      }
+  // ---- street trees at block MID-EDGES (not corners) so they never grow into
+  // the signal poles that stand on every intersection corner (#63, #74) ----
+  const placedSoFar = [];                             // furniture + shelters, to keep trees clear
+  for (const k in spots) for (const p of spots[k]) placedSoFar.push(p);
+  for (const b of model.buildings) {
+    const s = b.slab;
+    const edges = [
+      { horiz: true, fix: s.minZ, a: s.minX, b: s.maxX, out: -1 },
+      { horiz: true, fix: s.maxZ, a: s.minX, b: s.maxX, out: 1 },
+      { horiz: false, fix: s.minX, a: s.minZ, b: s.maxZ, out: -1 },
+      { horiz: false, fix: s.maxX, a: s.minZ, b: s.maxZ, out: 1 },
+    ];
+    for (const e of edges) {
+      if (rnd() < 0.55) continue;                     // ~45% of edges get a street tree
+      const len = e.b - e.a;
+      const along = e.a + len * (0.34 + rnd() * 0.32); // mid-block, away from the corner poles
+      const fixed = e.fix - e.out * 1.7;               // just onto the sidewalk from the curb
+      const x = e.horiz ? along : fixed, z = e.horiz ? fixed : along;
+      if (near(busStops, x, z, 5)) continue;
+      if (near(placedSoFar, x, z, 2.8)) continue;      // don't overlap furniture
+      addTree(x, z, STREET_TREES);
     }
   }
 
@@ -168,7 +180,14 @@ export function createProps(scene, model) {
   if (model.plaza) {
     const pz = model.plaza, cx = pz.cx, cz = pz.cz;
     const halfW = (pz.maxX - pz.minX) / 2 - 4, halfD = (pz.maxZ - pz.minZ) / 2 - 4;
-    const blocked = [{ x: cx, z: cz, r: 8 }, { x: cx - 15, z: cz - 13, r: 5 }, { x: cx + 15, z: cz + 14, r: 5 }];
+    const blocked = [
+      { x: cx, z: cz, r: 14 },              // fountain + roundabout
+      { x: cx - 15, z: cz - 13, r: 5 },     // gazebo
+      { x: cx + 15, z: cz + 14, r: 5 },     // clock tower
+      { x: cx + 15, z: cz - 13, r: 7 },     // playground
+      { x: cx - 14, z: cz + 12, r: 3 },     // statue
+      { x: cx - 23, z: cz + 21, r: 8 },     // pond
+    ];
     const okPark = (x, z) => !blocked.some((o) => (o.x - x) ** 2 + (o.z - z) ** 2 < o.r * o.r);
     const parkPlace = (k, count, extra) => {
       let placed = 0, tries = 0;
@@ -181,7 +200,7 @@ export function createProps(scene, model) {
         placed++;
       }
     };
-    add('statue', cx + 15, cz - 13, Math.PI);   // a landmark statue opposite the gazebo
+    add('statue', cx - 14, cz + 12, Math.PI);   // landmark statue in the NW quadrant (clear of the playground)
     parkPlace('picnic', 5);
     parkPlace('flowers', 6);
     parkPlace('bush', 7);

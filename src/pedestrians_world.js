@@ -112,7 +112,8 @@ function placePicnics(group, model, seated) {
   const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
   const blanketMat = new THREE.MeshStandardMaterial({ map: makeBlanketTex(), roughness: 0.95 });
   const blankGeo = new THREE.PlaneGeometry(2.4, 2.4); blankGeo.rotateX(-Math.PI / 2);
-  const blocked = [[cx, cz, 9], [cx - 15, cz - 13, 5], [cx + 15, cz + 14, 5]];
+  const blocked = [[cx, cz, 14], [cx - 15, cz - 13, 5], [cx + 15, cz + 14, 5], [cx + 15, cz - 13, 7], [cx - 14, cz + 12, 3], [cx - 23, cz + 21, 8]];
+  const cushCols = [0xb64a3a, 0x3d6a8f, 0x7a8a3a, 0x7a3a6a, 0xc9a23a];
   let placed = 0, tries = 0;
   while (placed < 5 && tries < 90) {
     tries++;
@@ -126,9 +127,14 @@ function placePicnics(group, model, seated) {
       const parts = seated[Math.floor(rnd() * seated.length)];
       const person = new THREE.Group();
       for (const part of parts) { const mm = new THREE.Mesh(part.geometry, part.material); mm.castShadow = true; mm.frustumCulled = false; person.add(mm); }
-      person.position.set(x + Math.cos(ang) * 0.85, CURB_Y + 0.02, z + Math.sin(ang) * 0.85);
-      person.rotation.y = Math.atan2(x - person.position.x, z - person.position.z); // face the blanket
+      const px = x + Math.cos(ang) * 0.85, pz = z + Math.sin(ang) * 0.85;
+      person.position.set(px, CURB_Y + 0.02, pz);
+      person.rotation.y = Math.atan2(x - px, z - pz); // face the blanket
       group.add(person);
+      // a low cushion so the seated pose isn't perched on an invisible chair (#75)
+      const cush = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.42, 0.62),
+        new THREE.MeshStandardMaterial({ color: cushCols[Math.floor(rnd() * cushCols.length)], roughness: 0.92 }));
+      cush.position.set(px, CURB_Y + 0.21, pz); cush.castShadow = true; cush.receiveShadow = true; group.add(cush);
     }
     placed++;
   }
