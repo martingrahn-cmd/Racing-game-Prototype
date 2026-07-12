@@ -343,6 +343,62 @@ function buildPlaza(group, plaza, CURB_Y) {
       chain.position.set(gx + off, CURB_Y + 2.15, gz + s * 0.15); group.add(chain);
     }
   }
+
+  // ---- benches ringing the fountain (facing in) ----
+  const wood = new THREE.MeshStandardMaterial({ color: 0x6a4a2f, roughness: 0.8, metalness: 0.05 });
+  for (let i = 0; i < 6; i++) {
+    const ang = (i / 6) * Math.PI * 2 + 0.3;
+    const bx = cx + Math.cos(ang) * 9.2, bz = cz + Math.sin(ang) * 9.2;
+    const bench = new THREE.Group();
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.1, 0.5), wood); seat.position.y = 0.46; bench.add(seat);
+    const back = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.5, 0.1), wood); back.position.set(0, 0.73, -0.2); bench.add(back);
+    for (const s of [-0.82, 0.82]) { const lg = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.46, 0.5), metal); lg.position.set(s, 0.23, 0); bench.add(lg); }
+    bench.position.set(bx, CURB_Y, bz); bench.rotation.y = ang + Math.PI / 2; bench.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    group.add(bench);
+  }
+
+  // ---- flower beds + hedges along the grass edges ----
+  const hedge = new THREE.MeshStandardMaterial({ color: 0x3f7a3a, roughness: 0.95 });
+  const blooms = [0xd85c7a, 0xe0b93a, 0xc95bd8, 0xe0663a];
+  for (const [sx, sz] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+    const bx = cx + sx * (w / 2 - 4.5), bz = cz + sz * (d / 2 - 4.5);
+    const bed = new THREE.Mesh(new THREE.BoxGeometry(sx ? 1.4 : 8, 0.4, sz ? 1.4 : 8), stone);
+    bed.position.set(bx, CURB_Y + 0.2, bz); bed.castShadow = true; group.add(bed);
+    const flower = new THREE.Mesh(new THREE.BoxGeometry(sx ? 1.1 : 7.6, 0.22, sz ? 1.1 : 7.6),
+      new THREE.MeshStandardMaterial({ color: blooms[(sx + sz + 2) % blooms.length], roughness: 0.9 }));
+    flower.position.set(bx, CURB_Y + 0.5, bz); group.add(flower);
+  }
+  for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+    const hx = cx + sx * (w / 2 - 3), hz = cz + sz * (d / 2 - 3);
+    const h = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.9, 3.2), hedge);
+    h.position.set(hx, CURB_Y + 0.45, hz); h.castShadow = true; group.add(h);
+  }
+
+  // ---- gazebo / bandstand landmark ----
+  const gzx = cx - 15, gzz = cz - 13;
+  const gzBase = new THREE.Mesh(new THREE.CylinderGeometry(3.4, 3.6, 0.5, 8), stone);
+  gzBase.position.set(gzx, CURB_Y + 0.25, gzz); gzBase.castShadow = true; group.add(gzBase);
+  for (let i = 0; i < 6; i++) {
+    const ang = (i / 6) * Math.PI * 2;
+    const col = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 3.2, 8), new THREE.MeshStandardMaterial({ color: 0xe8e2d4, roughness: 0.7 }));
+    col.position.set(gzx + Math.cos(ang) * 2.9, CURB_Y + 2.1, gzz + Math.sin(ang) * 2.9); col.castShadow = true; group.add(col);
+  }
+  const gzRoof = new THREE.Mesh(new THREE.ConeGeometry(3.7, 1.8, 8), new THREE.MeshStandardMaterial({ color: 0x5a6b74, roughness: 0.6, metalness: 0.3 }));
+  gzRoof.position.set(gzx, CURB_Y + 4.6, gzz); gzRoof.castShadow = true; group.add(gzRoof);
+
+  // ---- clock tower landmark ----
+  const ctx = cx + 15, ctz = cz + 14;
+  const shaft = new THREE.Mesh(new THREE.BoxGeometry(2.6, 13, 2.6), new THREE.MeshStandardMaterial({ color: 0xcfc7b6, roughness: 0.85 }));
+  shaft.position.set(ctx, CURB_Y + 6.5, ctz); shaft.castShadow = true; group.add(shaft);
+  const faceMat = new THREE.MeshStandardMaterial({ color: 0xf4f0e6, emissive: 0xffe6a8, emissiveIntensity: 0.1, roughness: 0.5 });
+  registerEmissive(faceMat, 0.1, 1.4);
+  for (const [ox, oz] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+    const face = new THREE.Mesh(new THREE.CircleGeometry(0.9, 20), faceMat);
+    face.position.set(ctx + ox * 1.32, CURB_Y + 11, ctz + oz * 1.32);
+    face.lookAt(ctx + ox * 4, CURB_Y + 11, ctz + oz * 4); group.add(face);
+  }
+  const ctRoof = new THREE.Mesh(new THREE.ConeGeometry(2.2, 2.4, 4), new THREE.MeshStandardMaterial({ color: 0x4a5560, roughness: 0.6, metalness: 0.3 }));
+  ctRoof.rotation.y = Math.PI / 4; ctRoof.position.set(ctx, CURB_Y + 14.2, ctz); ctRoof.castShadow = true; group.add(ctRoof);
 }
 
 // Minimal geometry merge for flat marking planes (position + uv only).
