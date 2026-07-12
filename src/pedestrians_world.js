@@ -34,43 +34,96 @@ const NIGHT_CROWD = 45;   // active pedestrians at night
 // geometry (~1.72 m tall, feet at 0, centred). All frames share ONE normalising
 // transform so the character's height doesn't jitter frame-to-frame. Returns an
 // array of NFRAMES frames, each an array of {geometry, material} parts.
-function bakeFlipbook(gltf, clip, nFrames) {
+function bakePoseRaw(gltf, clip, time) {
   const clone = SkeletonUtils.clone(gltf.scene);
   const mixer = new THREE.AnimationMixer(clone);
   mixer.clipAction(clip).play();
-  const skinned = [];
-  clone.traverse((o) => { if (o.isSkinnedMesh) skinned.push(o); });
-  const frames = [];
+  mixer.setTime(time);
+  clone.updateMatrixWorld(true);
+  const parts = [];
   const v = new THREE.Vector3();
-  for (let f = 0; f < nFrames; f++) {
-    mixer.setTime(clip.duration * (f / nFrames));
-    clone.updateMatrixWorld(true);
-    const parts = [];
-    for (const o of skinned) {
-      o.skeleton.update();
-      const g = o.geometry.clone();
-      const src = o.geometry.attributes.position;
-      const pos = g.attributes.position;
-      for (let i = 0; i < pos.count; i++) {
-        v.fromBufferAttribute(src, i);
-        o.applyBoneTransform(i, v);
-        v.applyMatrix4(o.matrixWorld);
-        pos.setXYZ(i, v.x, v.y, v.z);
-      }
-      g.deleteAttribute('skinIndex');
-      g.deleteAttribute('skinWeight');
-      g.computeVertexNormals();
-      parts.push({ geometry: g, material: o.material });
+  clone.traverse((o) => {
+    if (!o.isSkinnedMesh) return;
+    o.skeleton.update();
+    const g = o.geometry.clone();
+    const src = o.geometry.attributes.position;
+    const pos = g.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(src, i);
+      o.applyBoneTransform(i, v);
+      v.applyMatrix4(o.matrixWorld);
+      pos.setXYZ(i, v.x, v.y, v.z);
     }
-    frames.push(parts);
-  }
+    g.deleteAttribute('skinIndex');
+    g.deleteAttribute('skinWeight');
+    g.computeVertexNormals();
+    parts.push({ geometry: g, material: o.material });
+  });
+  return parts;
+}
+
+// scale a set of baked parts by `s`, centre on x/z, drop feet to y=0 (in place).
+function seatParts(parts, s) {
+  const box = new THREE.Box3();
+  for (const p of parts) { p.geometry.computeBoundingBox(); box.union(p.geometry.boundingBox); }
+  const m = new THREE.Matrix4().makeScale(s, s, s)
+    .multiply(new THREE.Matrix4().makeTranslation(-(box.min.x + box.max.x) / 2, -box.min.y, -(box.min.z + box.max.z) / 2));
+  for (const p of parts) p.geometry.applyMatrix4(m);
+  return parts;
+}
+
+// Returns { frames, scale }. Frames are normalised to 1.72 m tall (feet at 0);
+// scale is reused so a seated pose of the same model keeps human proportions.
+function bakeFlipbook(gltf, clip, nFrames) {
+  const frames = [];
+  for (let f = 0; f < nFrames; f++) frames.push(bakePoseRaw(gltf, clip, clip.duration * (f / nFrames)));
   const box = new THREE.Box3();
   for (const parts of frames) for (const p of parts) { p.geometry.computeBoundingBox(); box.union(p.geometry.boundingBox); }
   const s = 1.72 / (box.max.y - box.min.y || 1.72);
   const m = new THREE.Matrix4().makeScale(s, s, s)
     .multiply(new THREE.Matrix4().makeTranslation(-(box.min.x + box.max.x) / 2, -box.min.y, -(box.min.z + box.max.z) / 2));
   for (const parts of frames) for (const p of parts) p.geometry.applyMatrix4(m);
-  return frames;
+  return { frames, scale: s };
+}
+
+// a small red/cream checked picnic-blanket texture
+function makeBlanketTex() {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const x = c.getContext('2d');
+  const cols = ['#b64a3a', '#e8ddc8'];
+  for (let i = 0; i < 8; i++) for (let j = 0; j < 8; j++) { x.fillStyle = cols[(i + j) % 2]; x.fillRect(i * 8, j * 8, 8, 8); }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+
+// scatter picnic blankets with a few seated people on the plaza grass (static)
+function placePicnics(group, model, seated) {
+  const { CURB_Y, plaza } = model;
+  const cx = plaza.cx, cz = plaza.cz;
+  const halfW = (plaza.maxX - plaza.minX) / 2 - 5, halfD = (plaza.maxZ - plaza.minZ) / 2 - 5;
+  let seed = 99;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  const blanketMat = new THREE.MeshStandardMaterial({ map: makeBlanketTex(), roughness: 0.95 });
+  const blankGeo = new THREE.PlaneGeometry(2.4, 2.4); blankGeo.rotateX(-Math.PI / 2);
+  const blocked = [[cx, cz, 9], [cx - 15, cz - 13, 5], [cx + 15, cz + 14, 5]];
+  let placed = 0, tries = 0;
+  while (placed < 5 && tries < 90) {
+    tries++;
+    const x = cx + (rnd() * 2 - 1) * halfW, z = cz + (rnd() * 2 - 1) * halfD;
+    if (Math.abs(x - cx) < 2.4 || Math.abs(z - cz) < 2.4) continue;   // keep off the gravel paths
+    if (blocked.some(([bx, bz, r]) => (bx - x) ** 2 + (bz - z) ** 2 < r * r)) continue;
+    const bl = new THREE.Mesh(blankGeo, blanketMat); bl.position.set(x, CURB_Y + 0.05, z); bl.receiveShadow = true; group.add(bl);
+    const n = 2 + Math.floor(rnd() * 2);
+    for (let s = 0; s < n; s++) {
+      const ang = (s / n) * Math.PI * 2 + rnd() * 0.4;
+      const parts = seated[Math.floor(rnd() * seated.length)];
+      const person = new THREE.Group();
+      for (const part of parts) { const mm = new THREE.Mesh(part.geometry, part.material); mm.castShadow = true; mm.frustumCulled = false; person.add(mm); }
+      person.position.set(x + Math.cos(ang) * 0.85, CURB_Y + 0.02, z + Math.sin(ang) * 0.85);
+      person.rotation.y = Math.atan2(x - person.position.x, z - person.position.z); // face the blanket
+      group.add(person);
+    }
+    placed++;
+  }
 }
 
 // Build the sidewalk graph: a node per block corner, sidewalk edges around each
@@ -166,29 +219,31 @@ export function createPedestrians(scene, model, signals, count = DAY_CROWD) {
   const loader = makeGLTFLoader();
   Promise.all(MODELS.map((p) => new Promise((res) => loader.load(p, res, undefined, () => res(null)))))
     .then((gltfs) => {
-      const flipbooks = [];
+      const flipbooks = [];   // walk-cycle frames per usable model
+      const seated = [];      // one baked seated pose per model that has a sit/duck clip
       for (const gltf of gltfs) {
         if (!gltf || !gltf.animations || !gltf.animations.length) continue;
-        const clip = gltf.animations.find((c) => /walk/i.test(c.name)) || gltf.animations[0];
-        try { flipbooks.push(bakeFlipbook(gltf, clip, NFRAMES)); }
-        catch { /* skip a model that won't bake */ }
+        const walk = gltf.animations.find((c) => /walk/i.test(c.name)) || gltf.animations[0];
+        let baked;
+        try { baked = bakeFlipbook(gltf, walk, NFRAMES); } catch { continue; }
+        flipbooks.push(baked.frames);
+        const sit = gltf.animations.find((c) => /sit/i.test(c.name)) || gltf.animations.find((c) => /duck/i.test(c.name));
+        if (sit) { try { seated.push(seatParts(bakePoseRaw(gltf, sit, sit.duration * 0.6), baked.scale)); } catch { /* skip */ } }
       }
       if (!flipbooks.length) return;
 
       // matte the character materials so the headlight beam lights them like
       // cloth, not like a lantern (no specular flare, no emissive, muted albedo).
       const seen = new Set();
-      for (const fb of flipbooks) for (const parts of fb) for (const part of parts) {
-        const mm = part.material;
-        if (!mm || seen.has(mm)) continue;
-        seen.add(mm);
-        if (mm.isMeshStandardMaterial) {
-          mm.roughness = 1; mm.metalness = 0;
-          if (mm.emissive) mm.emissive.setScalar(0);
-          mm.emissiveIntensity = 0;
-          if (mm.color) mm.color.multiplyScalar(0.8);
-        }
-      }
+      const matte = (mm) => {
+        if (!mm || seen.has(mm) || !mm.isMeshStandardMaterial) return; seen.add(mm);
+        mm.roughness = 1; mm.metalness = 0;
+        if (mm.emissive) mm.emissive.setScalar(0);
+        mm.emissiveIntensity = 0;
+        if (mm.color) mm.color.multiplyScalar(0.8);
+      };
+      for (const fb of flipbooks) for (const parts of fb) for (const part of parts) matte(part.material);
+      for (const parts of seated) for (const part of parts) matte(part.material);
 
       for (let k = 0; k < count; k++) {
         const fb = flipbooks[k % flipbooks.length];
@@ -212,6 +267,8 @@ export function createPedestrians(scene, model, signals, count = DAY_CROWD) {
         chooseNext(p);
         peds.push(p);
       }
+
+      if (seated.length && model.plaza) placePicnics(group, model, seated);
     });
 
   return {
