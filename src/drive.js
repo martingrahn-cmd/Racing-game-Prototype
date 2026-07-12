@@ -8,18 +8,21 @@ import * as THREE from 'three';
 import { frameAt } from './track.js';
 
 const TRACK_HALF = 8.3;        // fence corridor half-width
-const MAX_SPEED = 61;          // m/s ≈ 220 km/h
+const MAX_SPEED = 42;          // m/s ≈ 150 km/h — heavier muscle car, not a hypercar
 const MAX_REVERSE = 9;
 
-// handling parameters, exposed so the debug GUI can tune them live
+// handling parameters, exposed so the debug GUI can tune them live.
+// Tuned for an American-muscle feel: lazy off-the-line grunt, a loose tail and
+// plenty of body sway rather than go-kart precision.
 export const TUNE = {
-  accel: 30,
+  accel: 18,
   brakeForce: 30,
-  grip: 11.1,
+  grip: 8.5,        // looser back end — the car floats and steps out
   driftGrip: 4,     // more bite in the slide = a heavier, less floaty drift
   steer: 3,
   driftSteer: 1.6,
-  sidewalkMax: 20,  // m/s — dialled-in feel from the debug panel
+  steerResponse: 6, // slower steering take-up → wallowy, swaying turn-in
+  sidewalkMax: 40,  // m/s — plough the pavement near full tilt
 };
 
 export function createDrive(curve, length, opts = {}) {
@@ -187,7 +190,7 @@ export function createDrive(curve, length, opts = {}) {
       if (!inp.hand && Math.abs(fwdSpeed) > 1) lastDir = Math.sign(fwdSpeed);
       const targetYawVel = -inp.steer * steerAuthority * (inp.hand ? TUNE.driftSteer : 1)
         * lastDir * Math.min(speed / 6, 1);
-      const response = inp.hand ? 2.3 : 10; // sliding tires hold their rotation (inertia = weight)
+      const response = inp.hand ? 2.3 : TUNE.steerResponse; // sliding tires hold their rotation (inertia = weight)
       yawVel += (targetYawVel - yawVel) * Math.min(1, response * dt);
       yaw += yawVel * dt;
       heading.set(Math.sin(yaw), 0, Math.cos(yaw));
@@ -248,9 +251,8 @@ export function createDrive(curve, length, opts = {}) {
           pos.y = airY;
         } else {
           if (fb.onCurb) {
-            if (!onCurbPrev && speed > 4) { vel.multiplyScalar(0.7); rumble(0.7, 0.5, 130); } // mount jolt
-            vel.multiplyScalar(Math.max(0, 1 - 2.4 * dt));   // bog down onto the kerb
-            const sp = vel.length();                          // hard cap: never a fast route
+            if (!onCurbPrev && speed > 4) { vel.multiplyScalar(0.85); rumble(0.7, 0.5, 130); } // mount jolt (lighter — keep momentum)
+            const sp = vel.length();                          // generous cap: rampage the pavement near full tilt
             if (sp > TUNE.sidewalkMax) vel.multiplyScalar(TUNE.sidewalkMax / sp);
           }
           onCurbPrev = fb.onCurb;
@@ -299,7 +301,7 @@ export function createDrive(curve, length, opts = {}) {
         speed: vel.length(),
         kmh: Math.abs(vel.dot(heading)) * 3.6,
         steer: inp.steer * 0.42,
-        roll: THREE.MathUtils.clamp(-lat * 0.012, -0.09, 0.09),
+        roll: THREE.MathUtils.clamp(-lat * 0.02, -0.16, 0.16), // soft suspension → visible body lean
         lookBack: inp.look,
         drifting,
         hand: inp.hand,               // handbrake held → rear wheels locked (skidmarks)
