@@ -94,9 +94,7 @@ if (WORLD) {
   const worldObj = buildWorld(scene, model);
   signals = createSignals(scene, model);
   worldTraffic = createWorldTraffic(scene, model, signals);
-  // pedestrians off by default: the current character models skin incorrectly
-  // (broken pose) — being redone with better models. Opt in with ?peds=1.
-  if (new URLSearchParams(location.search).has('peds')) pedestrians = createPedestrians(scene, model);
+  pedestrians = createPedestrians(scene, model);
   const collision = createCollision(model, {
     buildings: worldObj.colliders.buildings,
     obstacles: [...worldObj.obstacles, ...signals.obstacles],
