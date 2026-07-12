@@ -20,6 +20,7 @@ import { createSignals } from './signals.js';
 import { createCollision } from './collision.js';
 import { createWorldTraffic } from './traffic_world.js';
 import { createPedestrians } from './pedestrians_world.js';
+import { createProps } from './props_world.js';
 import GUI from '../vendor/lil-gui.module.min.js';
 
 // ?world=1 → open-world free-roam slice (Phase 1). Default = the race circuit.
@@ -97,9 +98,10 @@ if (WORLD) {
   signals = createSignals(scene, model);
   worldTraffic = createWorldTraffic(scene, model, signals);
   pedestrians = createPedestrians(scene, model, signals);
+  const props = createProps(scene, model);
   const collision = createCollision(model, {
     buildings: worldObj.colliders.buildings,
-    obstacles: [...worldObj.obstacles, ...signals.obstacles],
+    obstacles: [...worldObj.obstacles, ...signals.obstacles, ...props.obstacles],
   });
   drive = createDrive(null, 0, { world: { spawn: model.spawn, collision, curbY: model.CURB_Y } });
   scene.fog.near = 110; scene.fog.far = 560; // atmospheric fade at the district edge
@@ -154,7 +156,7 @@ const GAME_FILES = [
   'src/audio.js', 'src/smoke.js', 'src/skidmarks.js', 'src/daynight.js',
   'src/night.js', 'src/minimap.js',
   'src/citymodel.js', 'src/world.js', 'src/signals.js', 'src/collision.js',
-  'src/traffic_world.js', 'src/pedestrians_world.js',
+  'src/traffic_world.js', 'src/pedestrians_world.js', 'src/props_world.js',
   'vendor/three.module.js', 'vendor/lil-gui.module.min.js',
   'vendor/loaders/GLTFLoader.js', 'vendor/loaders/DRACOLoader.js',
   'vendor/utils/BufferGeometryUtils.js', 'vendor/utils/SkeletonUtils.js',

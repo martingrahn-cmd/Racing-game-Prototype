@@ -309,13 +309,15 @@ export function createCar(scene) {
 
   // headlight beams: registered so they only exist after dark
   for (const sx of [-0.55, 0.55]) {
-    const spot = new THREE.SpotLight(0xfff0d0, 0, 70, 0.46, 0.55, 1.0);
+    const spot = new THREE.SpotLight(0xfff0d0, 0, 70, 0.42, 0.7, 1.0);
     spot.position.set(sx, 0.72, 2.0);
     const target = new THREE.Object3D();
     target.position.set(sx * 2.2, 0.1, 30);
     root.add(spot, target);
     spot.target = target;
-    registerLight(spot, 0, 300);
+    // night intensity kept modest so people/props lit by the beam don't blow out
+    // into a glowing blob through the bloom pass (two beams overlap head-on)
+    registerLight(spot, 0, 120);
   }
 
   // ?car=glb (default, assets/car.glb) | saab (SVEN 9000) | proto (sports coupe)

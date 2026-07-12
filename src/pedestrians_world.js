@@ -157,6 +157,21 @@ export function createPedestrians(scene, model, signals, count = DAY_CROWD) {
       }
       if (!flipbooks.length) return;
 
+      // matte the character materials so the headlight beam lights them like
+      // cloth, not like a lantern (no specular flare, no emissive, muted albedo).
+      const seen = new Set();
+      for (const fb of flipbooks) for (const parts of fb) for (const part of parts) {
+        const mm = part.material;
+        if (!mm || seen.has(mm)) continue;
+        seen.add(mm);
+        if (mm.isMeshStandardMaterial) {
+          mm.roughness = 1; mm.metalness = 0;
+          if (mm.emissive) mm.emissive.setScalar(0);
+          mm.emissiveIntensity = 0;
+          if (mm.color) mm.color.multiplyScalar(0.8);
+        }
+      }
+
       for (let k = 0; k < count; k++) {
         const fb = flipbooks[k % flipbooks.length];
         const container = new THREE.Group();
