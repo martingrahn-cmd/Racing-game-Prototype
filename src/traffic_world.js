@@ -107,14 +107,15 @@ export function createWorldTraffic(scene, model, signals, count = 14) {
         mats.forEach((m) => { if (m.isMeshStandardMaterial) m.envMapIntensity = 0.45; });
       }
     });
-    // brake + head lights
-    const tailMat = new THREE.MeshStandardMaterial({ color: 0x330000, emissive: 0xff2200, emissiveIntensity: 0.4 });
-    for (const sx of [-0.55, 0.55]) {
-      const tl = new THREE.Mesh(lightGeo, tailMat); tl.position.set(sx, 0.55, -2.05); holder.add(tl);
-      const hl = new THREE.Mesh(lightGeo, headMat); hl.position.set(sx, 0.55, 2.05); holder.add(hl);
-    }
     car.group.remove(car.placeholder);
     car.group.add(holder);
+    // brake + head lights go on the UNSCALED container (not the scaled holder,
+    // which would multiply their offsets and fling them off the car)
+    const tailMat = new THREE.MeshStandardMaterial({ color: 0x330000, emissive: 0xff2200, emissiveIntensity: 0.4 });
+    for (const sx of [-0.55, 0.55]) {
+      const tl = new THREE.Mesh(lightGeo, tailMat); tl.position.set(sx, 0.62, -2.05); car.group.add(tl);
+      const hl = new THREE.Mesh(lightGeo, headMat); hl.position.set(sx, 0.62, 2.05); car.group.add(hl);
+    }
     car.tailMat = tailMat;
     car.rig = { spinNodes: rig.spinNodes, radius: rig.radius * scale, forwardSign: rig.forwardSign };
     car.applied = true;

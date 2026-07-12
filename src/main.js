@@ -94,7 +94,9 @@ if (WORLD) {
   const worldObj = buildWorld(scene, model);
   signals = createSignals(scene, model);
   worldTraffic = createWorldTraffic(scene, model, signals);
-  pedestrians = createPedestrians(scene, model);
+  // pedestrians off by default: the current character models skin incorrectly
+  // (broken pose) — being redone with better models. Opt in with ?peds=1.
+  if (new URLSearchParams(location.search).has('peds')) pedestrians = createPedestrians(scene, model);
   const collision = createCollision(model, {
     buildings: worldObj.colliders.buildings,
     obstacles: [...worldObj.obstacles, ...signals.obstacles],
@@ -562,7 +564,7 @@ function loop(now) {
   if (WORLD) {
     signals.update(dt);
     worldTraffic.update(dt, st ? st.pos : null);
-    pedestrians.update(dt, st ? st.pos : null);
+    if (pedestrians) pedestrians.update(dt, st ? st.pos : null);
   } else {
     extras.update(dt);
     traffic.update(dt);
