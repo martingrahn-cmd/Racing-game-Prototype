@@ -26,12 +26,14 @@ export function createCollision(model, colliders) {
   function resolve(pos, radius, vel) {
     let onCurb = false, hitHard = false, knocked = false;
 
-    // knockable furniture: drive it down (once) and let the car through
+    // knockable furniture: drive it down (once) and let the car through. Poles
+    // with a `group` topple via update() (and stand back up out of sight);
+    // legacy ones snap down via knock().
     for (const o of obstacles) {
       if (o.knocked) continue;
       const dx = pos.x - o.x, dz = pos.z - o.z;
       const rr = radius + o.r;
-      if (dx * dx + dz * dz < rr * rr) { o.knocked = true; o.knock(); knocked = true; }
+      if (dx * dx + dz * dz < rr * rr) { o.knocked = true; if (o.knock) o.knock(); knocked = true; }
     }
 
     // curb: inside the district but off every street → up on a block sidewalk.
@@ -70,5 +72,18 @@ export function createCollision(model, colliders) {
     return { onCurb, hitHard, knocked };
   }
 
-  return { resolve, isRoad };
+  // animate knockables: topple when hit, and quietly stand back up once the
+  // player is well away (out of sight) so the city repairs itself (#53, #54)
+  function update(dt, playerPos) {
+    for (const o of obstacles) {
+      if (!o.group) continue;
+      const far = playerPos ? ((o.x - playerPos.x) ** 2 + (o.z - playerPos.z) ** 2) > 4900 : true; // 70 m
+      if (o.knocked && far) o.knocked = false;
+      const target = o.knocked ? 1 : 0;
+      o.fall += (target - o.fall) * Math.min(1, dt * (o.knocked ? 9 : 3.5));
+      o.group.rotation[o.axis] = o.sign * 1.45 * o.fall;
+    }
+  }
+
+  return { resolve, isRoad, update };
 }

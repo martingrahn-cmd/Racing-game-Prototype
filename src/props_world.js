@@ -39,7 +39,9 @@ const PARK_TREES = ['tree', 'tree2', 'oak', 'pine'];  // pines belong in the par
 // signs are held back for now — mailboxes suit a residential district (#45) and
 // signs need real intersection logic (#46) before they belong on a corner.
 const FURNITURE = ['bench', 'bench', 'trash', 'trash', 'hydrant', 'bicycle', 'bicycle',
-  'meter', 'bush', 'bush', 'phonebooth', 'dumpster', 'cone', 'barrier'];
+  'meter', 'meter', 'bush', 'bush', 'dumpster', 'cone', 'barrier'];
+// rare accents placed at most once per block edge (phone booths were too dense, #47)
+const ACCENTS = ['phonebooth'];
 // props that get a random per-instance colour for variety (#50 bikes, #55 benches)
 const TINT = {
   bicycle: [0xb63a34, 0x2f6fb0, 0x2f8f6f, 0xd7a12b, 0x24272c, 0xe8e2d4, 0x6a4a8f, 0xc0552f],
@@ -135,12 +137,14 @@ export function createProps(scene, model) {
       }
       const fixed = e.fix - e.out[e.horiz ? 1 : 0] * INSET;
       const n = Math.max(1, Math.floor((len - 6) / SP));
+      // at most one rare accent (phone booth) per edge, not every slot (#47)
+      const accentAt = !e.entrance && rnd() < 0.16 ? Math.floor(rnd() * (n + 1)) : -1;
       for (let i = 0; i <= n; i++) {
         const along = e.a + 3 + (len - 6) * (i / n);
         if (e.entrance && Math.abs(along - b.cx) < 4.5) continue;
         const x = e.horiz ? along : fixed, z = e.horiz ? fixed : along;
         if (stop && (x - stop.x) ** 2 + (z - stop.z) ** 2 < 16) continue; // clearance around the shelter
-        add(pick(FURNITURE), x, z, yaw);
+        add(i === accentAt ? pick(ACCENTS) : pick(FURNITURE), x, z, yaw);
       }
     }
   }

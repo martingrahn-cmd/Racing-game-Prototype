@@ -193,21 +193,50 @@ export function buildWorld(scene, model) {
   buildApartments(group, aptSpots, CURB_Y);
   const hedgeMat = new THREE.MeshStandardMaterial({ color: 0x3f7a3a, roughness: 0.95, metalness: 0 });
   const hedgeGeo = new THREE.BoxGeometry(1, 1, 1);
+  const fenceMat = new THREE.MeshStandardMaterial({ color: 0xb7a684, roughness: 0.85, metalness: 0 });
+  const garageWall = new THREE.MeshStandardMaterial({ color: 0xd0cabb, roughness: 0.9, metalness: 0 });
+  const garageDoor = new THREE.MeshStandardMaterial({ color: 0x6a5a44, roughness: 0.6, metalness: 0.25 });
+  const garageRoof = new THREE.MeshStandardMaterial({ color: 0x7a5140, roughness: 0.8 });
+  const parkedSpots = [];
   for (const b of villaBlocks) {
     const lot = new THREE.Mesh(new THREE.BoxGeometry(b.maxX - b.minX + 2, 0.06, b.maxZ - b.minZ + 2), lotGrass);
     lot.position.set(b.cx, CURB_Y + 0.04, b.cz); lot.receiveShadow = true; group.add(lot);
-    // garden hedges dividing the plots so the lawn reads as gardens, not a field
     let seed = (b.bi * 13 + b.bj * 29) & 255;
     const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
-    for (let i = 0; i < 7; i++) {
+    // a low fence (or hedge) ringing the plot so it reads as a real property
+    const perimMat = rnd() < 0.5 ? fenceMat : hedgeMat;
+    const fh = 1.0, ins = 1.0, th = 0.14;
+    for (const zz of [b.minZ + ins, b.maxZ - ins]) {
+      const f = new THREE.Mesh(new THREE.BoxGeometry(b.maxX - b.minX - 2 * ins, fh, th), perimMat);
+      f.position.set(b.cx, CURB_Y + fh / 2, zz); f.castShadow = true; group.add(f);
+    }
+    for (const xx of [b.minX + ins, b.maxX - ins]) {
+      const f = new THREE.Mesh(new THREE.BoxGeometry(th, fh, b.maxZ - b.minZ - 2 * ins), perimMat);
+      f.position.set(xx, CURB_Y + fh / 2, b.cz); f.castShadow = true; group.add(f);
+    }
+    // garden hedges dividing the plots
+    for (let i = 0; i < 6; i++) {
       const long = 3 + rnd() * 5;
       const hedge = new THREE.Mesh(hedgeGeo, hedgeMat);
       hedge.scale.set(rnd() < 0.5 ? long : 0.7, 0.9, rnd() < 0.5 ? 0.7 : long);
       hedge.position.set(b.minX + 5 + rnd() * (b.maxX - b.minX - 10), CURB_Y + 0.45, b.minZ + 5 + rnd() * (b.maxZ - b.minZ - 10));
       hedge.castShadow = true; hedge.receiveShadow = true; group.add(hedge);
     }
+    // a couple of garages, each with a car parked out front
+    for (let g = 0; g < 2; g++) {
+      const gx = b.minX + 9 + rnd() * (b.maxX - b.minX - 18);
+      const gz = b.minZ + 9 + rnd() * (b.maxZ - b.minZ - 18);
+      const gyaw = Math.floor(rnd() * 4) * Math.PI / 2;
+      const gar = new THREE.Group();
+      const body = new THREE.Mesh(new THREE.BoxGeometry(5, 2.8, 5), garageWall); body.position.y = 1.4; body.castShadow = true; body.receiveShadow = true; gar.add(body);
+      const door = new THREE.Mesh(new THREE.BoxGeometry(3.2, 2.1, 0.12), garageDoor); door.position.set(0, 1.05, 2.56); gar.add(door);
+      const roof = new THREE.Mesh(new THREE.ConeGeometry(4.0, 1.4, 4), garageRoof); roof.rotation.y = Math.PI / 4; roof.position.y = 3.5; roof.castShadow = true; gar.add(roof);
+      gar.position.set(gx, CURB_Y, gz); gar.rotation.y = gyaw; group.add(gar);
+      if (rnd() < 0.7) parkedSpots.push({ x: gx + Math.sin(gyaw) * 5.6, z: gz + Math.cos(gyaw) * 5.6, yaw: gyaw });
+    }
   }
   buildVillas(group, villaSpots, CURB_Y);
+  buildParkedCars(group, parkedSpots, CURB_Y);
   buildStreetLamps(group, model);
 
   // -------------------------------------------------- distant filler
@@ -255,11 +284,12 @@ function addEntrance(group, obstacles, b, m, CURB_Y) {
   for (const s of [-1, 1]) {
     const sconce = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.5, 0.16), m.sconceMat);
     sconce.position.set(cx + s * (DW / 2 + 0.42), CURB_Y + 2.7, faceZ + nz * 0.16); group.add(sconce);
+    const bx = cx + s * (DW / 2 + 0.9), bz = faceZ + nz * 2.4;
+    const bg = new THREE.Group(); bg.position.set(bx, CURB_Y, bz);
     const bollard = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.9, 10), m.bollardMat);
-    bollard.position.set(cx + s * (DW / 2 + 0.9), CURB_Y + 0.45, faceZ + nz * 2.4);
-    bollard.castShadow = true; group.add(bollard);
-    obstacles.push({ x: bollard.position.x, z: bollard.position.z, r: 0.3, knocked: false,
-      knock: () => { bollard.rotation.x = 1.4; bollard.position.y = CURB_Y + 0.1; } });
+    bollard.position.y = 0.45; bollard.castShadow = true; bg.add(bollard);
+    group.add(bg);
+    obstacles.push({ x: bx, z: bz, r: 0.3, group: bg, axis: 'x', sign: nz >= 0 ? 1 : -1, knocked: false, fall: 0 });
   }
 }
 
@@ -368,9 +398,8 @@ function buildApartments(group, spots, CURB_Y) {
 }
 
 // A villa block: detached houses set back on a garden lot, facing the streets.
-// house2 ("Small Building") reads as a plain box — use proper houses (incl. a
-// nicer detached house with a driveway)
-const VILLA_MODELS = ['assets/poly/house1.glb', 'assets/poly/villa1.glb', 'assets/poly/villa_c.glb'];
+// villa1 (pink) is out by request; use the brick two-storey and the driveway house
+const VILLA_MODELS = ['assets/poly/house1.glb', 'assets/poly/villa_c.glb'];
 function collectVillas(b, out) {
   const W = 15;    // house + garden spacing along the street
   const OFF = 6;   // set back from the street edge (front garden)
@@ -426,6 +455,29 @@ function buildVillas(group, spots, CURB_Y) {
       }
     }, undefined, () => { /* skip a villa model that fails to load */ });
   });
+}
+
+// A few parked cars outside the villa garages (instanced from a traffic model).
+function buildParkedCars(group, spots, CURB_Y) {
+  if (!spots.length) return;
+  const loader = makeGLTFLoader();
+  loader.load('assets/traffic/sedan1.glb', (gltf) => {
+    gltf.scene.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(gltf.scene);
+    const size = box.getSize(new THREE.Vector3());
+    const s = 4.3 / Math.max(size.x, size.z);
+    const N = new THREE.Matrix4().makeScale(s, s, s)
+      .multiply(new THREE.Matrix4().makeTranslation(-(box.min.x + box.max.x) / 2, -box.min.y, -(box.min.z + box.max.z) / 2));
+    const parts = [];
+    gltf.scene.traverse((o) => { if (o.isMesh) { const g = o.geometry.clone(); g.applyMatrix4(o.matrixWorld); g.applyMatrix4(N); parts.push({ geometry: g, material: o.material }); } });
+    for (const part of parts) {
+      const im = new THREE.InstancedMesh(part.geometry, part.material, spots.length);
+      im.castShadow = true; im.receiveShadow = true;
+      const M = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
+      for (let i = 0; i < spots.length; i++) { q.setFromAxisAngle(up, spots[i].yaw); p.set(spots[i].x, CURB_Y, spots[i].z); M.compose(p, q, one); im.setMatrixAt(i, M); }
+      group.add(im);
+    }
+  }, undefined, () => { /* skip parked cars if the model fails */ });
 }
 
 // Merge indexed geometries keeping position + normal (for untextured props).

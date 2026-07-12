@@ -90,7 +90,7 @@ const skidmarks = createSkidmarks(scene);
 
 let curve = null, length = 0, cornerSpans = null;
 let extras = null, traffic = null, minimap = null, signals = null, worldTraffic = null, pedestrians = null, drive;
-let worldModel = null, worldAttract = false;
+let worldModel = null, worldAttract = false, worldCollision = null;
 if (WORLD) {
   const model = createCityModel();
   worldModel = model; worldAttract = true;
@@ -103,6 +103,7 @@ if (WORLD) {
     buildings: worldObj.colliders.buildings,
     obstacles: [...worldObj.obstacles, ...signals.obstacles, ...props.obstacles],
   });
+  worldCollision = collision;
   drive = createDrive(null, 0, { world: { spawn: model.spawn, collision, curbY: model.CURB_Y } });
   scene.fog.near = 110; scene.fog.far = 560; // atmospheric fade at the district edge
   const mm = document.getElementById('minimap'); if (mm) mm.style.display = 'none';
@@ -622,6 +623,7 @@ function loop(now) {
   const kmh = updateCamera(dt, perfTime, st);
   if (WORLD) {
     signals.update(dt);
+    if (worldCollision) worldCollision.update(dt, st ? st.pos : null);
     worldTraffic.update(dt, st ? st.pos : null);
     if (pedestrians) pedestrians.update(dt, st ? st.pos : null);
   } else {
