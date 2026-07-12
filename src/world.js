@@ -197,44 +197,14 @@ export function buildWorld(scene, model) {
   const garageWall = new THREE.MeshStandardMaterial({ color: 0xd0cabb, roughness: 0.9, metalness: 0 });
   const garageDoor = new THREE.MeshStandardMaterial({ color: 0x6a5a44, roughness: 0.6, metalness: 0.25 });
   const garageRoof = new THREE.MeshStandardMaterial({ color: 0x7a5140, roughness: 0.8 });
-  const parkedSpots = [];
   for (const b of villaBlocks) {
     const lot = new THREE.Mesh(new THREE.BoxGeometry(b.maxX - b.minX + 2, 0.06, b.maxZ - b.minZ + 2), lotGrass);
     lot.position.set(b.cx, CURB_Y + 0.04, b.cz); lot.receiveShadow = true; group.add(lot);
-    let seed = (b.bi * 13 + b.bj * 29) & 255;
-    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
-    // a low fence (or hedge) ringing the plot so it reads as a real property
-    const perimMat = rnd() < 0.5 ? fenceMat : hedgeMat;
-    const fh = 1.0, ins = 1.0, th = 0.14;
-    for (const zz of [b.minZ + ins, b.maxZ - ins]) {
-      const f = new THREE.Mesh(new THREE.BoxGeometry(b.maxX - b.minX - 2 * ins, fh, th), perimMat);
-      f.position.set(b.cx, CURB_Y + fh / 2, zz); f.castShadow = true; group.add(f);
-    }
-    for (const xx of [b.minX + ins, b.maxX - ins]) {
-      const f = new THREE.Mesh(new THREE.BoxGeometry(th, fh, b.maxZ - b.minZ - 2 * ins), perimMat);
-      f.position.set(xx, CURB_Y + fh / 2, b.cz); f.castShadow = true; group.add(f);
-    }
-    // garden hedges dividing the plots
-    for (let i = 0; i < 6; i++) {
-      const long = 3 + rnd() * 5;
-      const hedge = new THREE.Mesh(hedgeGeo, hedgeMat);
-      hedge.scale.set(rnd() < 0.5 ? long : 0.7, 0.9, rnd() < 0.5 ? 0.7 : long);
-      hedge.position.set(b.minX + 5 + rnd() * (b.maxX - b.minX - 10), CURB_Y + 0.45, b.minZ + 5 + rnd() * (b.maxZ - b.minZ - 10));
-      hedge.castShadow = true; hedge.receiveShadow = true; group.add(hedge);
-    }
-    // a couple of garages, each with a car parked out front
-    for (let g = 0; g < 2; g++) {
-      const gx = b.minX + 9 + rnd() * (b.maxX - b.minX - 18);
-      const gz = b.minZ + 9 + rnd() * (b.maxZ - b.minZ - 18);
-      const gyaw = Math.floor(rnd() * 4) * Math.PI / 2;
-      const gar = new THREE.Group();
-      const body = new THREE.Mesh(new THREE.BoxGeometry(5, 2.8, 5), garageWall); body.position.y = 1.4; body.castShadow = true; body.receiveShadow = true; gar.add(body);
-      const door = new THREE.Mesh(new THREE.BoxGeometry(3.2, 2.1, 0.12), garageDoor); door.position.set(0, 1.05, 2.56); gar.add(door);
-      const roof = new THREE.Mesh(new THREE.ConeGeometry(4.0, 1.4, 4), garageRoof); roof.rotation.y = Math.PI / 4; roof.position.y = 3.5; roof.castShadow = true; gar.add(roof);
-      gar.position.set(gx, CURB_Y, gz); gar.rotation.y = gyaw; group.add(gar);
-      if (rnd() < 0.7) parkedSpots.push({ x: gx + Math.sin(gyaw) * 5.6, z: gz + Math.cos(gyaw) * 5.6, yaw: gyaw });
-    }
   }
+  // each street-facing house gets its own fenced front garden + garage + driveway
+  // (#79: individual plots, not one fence around the whole block)
+  const parkedSpots = buildVillaGardens(group, villaSpots, CURB_Y,
+    { fenceMat, garageWall, garageDoor, garageRoof, hedgeMat, hedgeGeo });
   buildVillas(group, villaSpots, CURB_Y);
   buildParkedCars(group, parkedSpots, CURB_Y);
   buildStreetLamps(group, model);
@@ -428,14 +398,19 @@ function buildApartments(group, spots, CURB_Y) {
 // A villa block: detached houses set back on a garden lot, facing the streets.
 // villa1 (pink) is out by request; use the brick two-storey and the driveway house
 const VILLA_MODELS = ['assets/poly/house1.glb', 'assets/poly/villa_c.glb'];
+// house1 ships with salmon-pink walls and villa_c is all-white; recolour both to
+// dark-red / earthy tones (#67, #79). villa_c is a single material, so it gets a
+// per-instance colour for variety; house1's walls are the `_defaultMat` part.
+const VILLA_WALL = 0x7a2b26;
+const VILLA_PALETTE = [0x7a2b26, 0x8f3a2c, 0x662a2a, 0x93502f, 0x6d4a3a, 0x844238];
 function collectVillas(b, out) {
   const W = 15;    // house + garden spacing along the street
   const OFF = 6;   // set back from the street edge (front garden)
   const edges = [
-    { horiz: true, fix: b.minZ + OFF, a: b.minX, len: b.maxX - b.minX, yaw: Math.PI },
-    { horiz: true, fix: b.maxZ - OFF, a: b.minX, len: b.maxX - b.minX, yaw: 0 },
-    { horiz: false, fix: b.minX + OFF, a: b.minZ, len: b.maxZ - b.minZ, yaw: -Math.PI / 2 },
-    { horiz: false, fix: b.maxX - OFF, a: b.minZ, len: b.maxZ - b.minZ, yaw: Math.PI / 2 },
+    { horiz: true, fix: b.minZ + OFF, a: b.minX, len: b.maxX - b.minX, yaw: Math.PI, out: [0, -1] },
+    { horiz: true, fix: b.maxZ - OFF, a: b.minX, len: b.maxX - b.minX, yaw: 0, out: [0, 1] },
+    { horiz: false, fix: b.minX + OFF, a: b.minZ, len: b.maxZ - b.minZ, yaw: -Math.PI / 2, out: [-1, 0] },
+    { horiz: false, fix: b.maxX - OFF, a: b.minZ, len: b.maxZ - b.minZ, yaw: Math.PI / 2, out: [1, 0] },
   ];
   let seed = (b.bi * 31 + b.bj * 17) & 255;
   const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
@@ -444,7 +419,7 @@ function collectVillas(b, out) {
     const n = Math.max(2, Math.round(usable / W));
     for (let i = 0; i < n; i++) {
       const along = e.a + OFF + usable * ((i + 0.5) / n);
-      out.push({ x: e.horiz ? along : e.fix, z: e.horiz ? e.fix : along, yaw: e.yaw, m: Math.floor(rnd() * VILLA_MODELS.length) });
+      out.push({ x: e.horiz ? along : e.fix, z: e.horiz ? e.fix : along, yaw: e.yaw, m: Math.floor(rnd() * VILLA_MODELS.length), edge: true, out: e.out });
     }
   }
   // a couple of houses set into the middle so the lot isn't a bare lawn
@@ -453,7 +428,7 @@ function collectVillas(b, out) {
     out.push({
       x: b.minX + 12 + rnd() * (b.maxX - b.minX - 24),
       z: b.minZ + 12 + rnd() * (b.maxZ - b.minZ - 24),
-      yaw: rnd() * Math.PI * 2, m: Math.floor(rnd() * VILLA_MODELS.length),
+      yaw: rnd() * Math.PI * 2, m: Math.floor(rnd() * VILLA_MODELS.length), edge: false,
     });
   }
 }
@@ -473,16 +448,84 @@ function buildVillas(group, spots, CURB_Y) {
         .multiply(new THREE.Matrix4().makeTranslation(-(box.min.x + box.max.x) / 2, -box.min.y, -(box.min.z + box.max.z) / 2));
       const parts = [];
       gltf.scene.traverse((o) => { if (o.isMesh) { const g = o.geometry.clone(); g.applyMatrix4(o.matrixWorld); g.applyMatrix4(N); parts.push({ geometry: g, material: o.material }); } });
+      const mono = parts.length === 1;   // villa_c: one white material → per-instance colour
       for (const part of parts) {
+        const m = part.material, nm = (m.name || '').toLowerCase();
+        if (!mono) {
+          if (nm === '_defaultmat') m.color.setHex(VILLA_WALL);   // house1's salmon walls → dark red
+          else if (nm.includes('roof')) m.color.setHex(0x5f5148); // tone down the teal roof
+        } else { m.color.setHex(0xffffff); m.vertexColors = false; } // white base so instanceColor is exact
         litWindows(part.material);
         const im = new THREE.InstancedMesh(part.geometry, part.material, list.length);
         im.castShadow = true; im.receiveShadow = true;
         const M = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
-        for (let i = 0; i < list.length; i++) { q.setFromAxisAngle(up, list[i].yaw); p.set(list[i].x, CURB_Y, list[i].z); M.compose(p, q, one); im.setMatrixAt(i, M); }
+        for (let i = 0; i < list.length; i++) {
+          q.setFromAxisAngle(up, list[i].yaw); p.set(list[i].x, CURB_Y, list[i].z); M.compose(p, q, one); im.setMatrixAt(i, M);
+          if (mono) im.setColorAt(i, new THREE.Color(VILLA_PALETTE[(Math.round(list[i].x) * 3 + i) % VILLA_PALETTE.length]));
+        }
+        if (im.instanceColor) im.instanceColor.needsUpdate = true;
         group.add(im);
       }
     }, undefined, () => { /* skip a villa model that fails to load */ });
   });
+}
+
+// Per-house front gardens: for every street-facing villa, a low fence around a
+// front garden with a driveway gap, a garage on the driveway side, a paved
+// driveway, and 0/1/2 cars parked on it (#79). Returns the parked-car spots.
+function buildVillaGardens(group, spots, CURB_Y, mats) {
+  const { fenceMat, garageWall, garageDoor, garageRoof, hedgeMat, hedgeGeo } = mats;
+  const driveMat = new THREE.MeshStandardMaterial({ color: 0x6a6a6f, roughness: 0.95, metalness: 0 });
+  const parkedSpots = [];
+  const FH = 0.9, halfW = 6.2, front = 5.0, gapH = 2.0;
+  for (const s of spots) {
+    if (!s.edge || !s.out) continue;
+    const [ox, oz] = s.out;             // toward the street
+    const ax = -oz, az = ox;            // along the street
+    let sd = (Math.round(s.x) * 73 + Math.round(s.z) * 91 + 7) & 0x7fffffff;
+    const rnd = () => { sd = (sd * 1103515245 + 12345) & 0x7fffffff; return sd / 0x7fffffff; };
+    const side = rnd() < 0.5 ? 1 : -1;          // which side the driveway/garage is on
+    const gapC = side * (halfW - 2.4);          // driveway gap centre along the fence
+    const fx = s.x + ox * front, fz = s.z + oz * front; // front fence centre, near the curb
+    // front fence in two runs, leaving the driveway gap
+    const seg = (c0, c1) => {
+      const len = Math.abs(c1 - c0); if (len < 0.3) return;
+      const mid = (c0 + c1) / 2;
+      const f = new THREE.Mesh(new THREE.BoxGeometry(Math.abs(ax) * len + 0.13, FH, Math.abs(az) * len + 0.13), fenceMat);
+      f.position.set(fx + ax * mid, CURB_Y + FH / 2, fz + az * mid); f.castShadow = true; group.add(f);
+    };
+    seg(-halfW, gapC - gapH); seg(gapC + gapH, halfW);
+    // two side fences running back from the front corners toward the house
+    const backLen = front + 1.2;
+    for (const cs of [-1, 1]) {
+      const c0x = fx + ax * (cs * halfW), c0z = fz + az * (cs * halfW);
+      const f = new THREE.Mesh(new THREE.BoxGeometry(Math.abs(ox) * backLen + 0.13, FH, Math.abs(oz) * backLen + 0.13), fenceMat);
+      f.position.set(c0x - ox * backLen / 2, CURB_Y + FH / 2, c0z - oz * backLen / 2); f.castShadow = true; group.add(f);
+    }
+    // a shrub or two in the garden
+    for (let h = 0; h < 2; h++) {
+      const hb = new THREE.Mesh(hedgeGeo, hedgeMat);
+      hb.scale.set(1.1, 0.8, 1.1);
+      hb.position.set(s.x + ax * (-side * (halfW - 2)) + ox * (1.5 + h * 1.6), CURB_Y + 0.4, s.z + az * (-side * (halfW - 2)) + oz * (1.5 + h * 1.6));
+      hb.castShadow = true; group.add(hb);
+    }
+    // garage on the driveway side, door facing the street
+    const grx = s.x + ax * (side * (halfW - 1.6)), grz = s.z + az * (side * (halfW - 1.6));
+    const gyaw = Math.atan2(ox, oz);
+    const gar = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(4.4, 2.7, 4.4), garageWall); body.position.y = 1.35; body.castShadow = true; body.receiveShadow = true; gar.add(body);
+    const door = new THREE.Mesh(new THREE.BoxGeometry(3.0, 2.0, 0.12), garageDoor); door.position.set(0, 1.0, 2.26); gar.add(door);
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(3.5, 1.3, 4), garageRoof); roof.rotation.y = Math.PI / 4; roof.position.y = 3.35; roof.castShadow = true; gar.add(roof);
+    gar.position.set(grx, CURB_Y, grz); gar.rotation.y = gyaw; group.add(gar);
+    // paved driveway from the garage out to the street gap
+    const dl = front + 3;
+    const drv = new THREE.Mesh(new THREE.BoxGeometry(Math.abs(ox) * dl + Math.abs(ax) * 3.4, 0.05, Math.abs(oz) * dl + Math.abs(az) * 3.4), driveMat);
+    drv.position.set(grx + ox * (dl / 2 - 1), CURB_Y + 0.05, grz + oz * (dl / 2 - 1)); drv.receiveShadow = true; group.add(drv);
+    // 0, 1 or 2 cars on the driveway (weighted)
+    const r = rnd(); const nCars = r < 0.32 ? 0 : r < 0.72 ? 1 : 2;
+    for (let c = 0; c < nCars; c++) parkedSpots.push({ x: grx + ox * (2.6 + c * 3.0), z: grz + oz * (2.6 + c * 3.0), yaw: gyaw });
+  }
+  return parkedSpots;
 }
 
 // A wedge stunt ramp (entry at local z=0, rising to height H at z=L).
