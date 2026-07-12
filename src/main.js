@@ -105,7 +105,7 @@ if (WORLD) {
     obstacles: [...worldObj.obstacles, ...signals.obstacles, ...props.obstacles],
   });
   worldCollision = collision;
-  drive = createDrive(null, 0, { world: { spawn: model.spawn, collision, curbY: model.CURB_Y } });
+  drive = createDrive(null, 0, { world: { spawn: model.spawn, collision, curbY: model.CURB_Y, ramps: worldObj.ramps } });
   scene.fog.near = 110; scene.fog.far = 560; // atmospheric fade at the district edge
   const mm = document.getElementById('minimap'); if (mm) mm.style.display = 'none';
 } else {
@@ -498,8 +498,8 @@ function updateCamera(dt, time, st) {
   camera.up.normalize();
   camera.lookAt(smoothedLook);
 
-  const targetFov = 62 + sf * 13 + (camMode === 1 ? 6 : 0);
-  camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 3);
+  const targetFov = 62 + sf * 13 + (camMode === 1 ? 6 : 0) + (st?.boosting ? 9 : 0);
+  camera.fov += (targetFov - camera.fov) * Math.min(1, dt * (st?.boosting ? 6 : 3));
   camera.updateProjectionMatrix();
 
   // shadow frustum follows the action

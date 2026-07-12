@@ -254,8 +254,10 @@ export function buildWorld(scene, model) {
     }
   }
 
+  const ramps = buildRamps(group, model);
+
   const buildingAABBs = model.buildings.map((b) => ({ minX: b.minX, maxX: b.maxX, minZ: b.minZ, maxZ: b.maxZ }));
-  return { group, colliders: { buildings: buildingAABBs }, obstacles, updateDoors: (dt, playerPos) => updateDoors(doors, dt, playerPos) };
+  return { group, colliders: { buildings: buildingAABBs }, obstacles, ramps, updateDoors: (dt, playerPos) => updateDoors(doors, dt, playerPos) };
 }
 
 // street entrance on the building's south (-z) face: recessed portal with frame,
@@ -477,6 +479,44 @@ function buildVillas(group, spots, CURB_Y) {
       }
     }, undefined, () => { /* skip a villa model that fails to load */ });
   });
+}
+
+// A wedge stunt ramp (entry at local z=0, rising to height H at z=L).
+function makeRampGeo(W, L, H) {
+  const hw = W / 2;
+  const a = [-hw, 0, 0], b = [hw, 0, 0], c = [-hw, 0, L], d = [hw, 0, L], e = [-hw, H, L], f = [hw, H, L];
+  const tris = [a, b, f, a, f, e, /*incline*/ d, c, e, d, e, f, /*back*/ a, c, d, a, d, b, /*bottom*/ a, e, c, /*left*/ b, d, f /*right*/];
+  const pos = new Float32Array(tris.length * 3);
+  tris.forEach((v, i) => { pos[i * 3] = v[0]; pos[i * 3 + 1] = v[1]; pos[i * 3 + 2] = v[2]; });
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.computeVertexNormals();
+  return g;
+}
+
+// Stunt ramps down the two central avenues — hit one at speed to launch (fun hook).
+function buildRamps(group, model) {
+  const { nodes, LANE } = model;
+  const W = 6, L = 7, H = 2.3;
+  const geo = makeRampGeo(W, L, H);
+  const mat = new THREE.MeshStandardMaterial({ color: 0xe0b020, emissive: 0x3a2c00, emissiveIntensity: 0.3, roughness: 0.6, metalness: 0.2 });
+  const mid = (model.BLOCKS - 1) / 2;   // the central avenue the player spawns on
+  const specs = [];
+  for (const seg of [mid - 3, mid - 1, mid + 1, mid + 3]) {
+    if (seg < 0 || seg >= nodes.length - 1) continue;
+    specs.push({ x: nodes[mid] - LANE, z: (nodes[seg] + nodes[seg + 1]) / 2, dir: [0, 1] });  // central N–S avenue
+    specs.push({ x: (nodes[seg] + nodes[seg + 1]) / 2, z: nodes[mid] + LANE, dir: [1, 0] });  // central E–W avenue
+  }
+  const ramps = [];
+  for (const s of specs) {
+    const yaw = Math.atan2(s.dir[0], s.dir[1]);
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(s.x, 0.02, s.z); m.rotation.y = yaw; m.castShadow = true; m.receiveShadow = true;
+    group.add(m);
+    // launch zone centred on the ramp's middle, sized to its footprint
+    ramps.push({ x: s.x + s.dir[0] * L / 2, z: s.z + s.dir[1] * L / 2, dir: s.dir, halfL: L / 2 + 1, halfW: W / 2 + 0.5 });
+  }
+  return ramps;
 }
 
 // A few parked cars outside the villa garages (instanced from a traffic model).
