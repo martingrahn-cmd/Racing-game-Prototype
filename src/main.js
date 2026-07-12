@@ -18,6 +18,7 @@ import { createCityModel } from './citymodel.js';
 import { buildWorld } from './world.js';
 import { createSignals } from './signals.js';
 import { createCollision } from './collision.js';
+import { createWorldTraffic } from './traffic_world.js';
 import GUI from '../vendor/lil-gui.module.min.js';
 
 // ?world=1 → open-world free-roam slice (Phase 1). Default = the race circuit.
@@ -86,11 +87,12 @@ const smoke = createSmoke(scene);
 const skidmarks = createSkidmarks(scene);
 
 let curve = null, length = 0, cornerSpans = null;
-let extras = null, traffic = null, minimap = null, signals = null, drive;
+let extras = null, traffic = null, minimap = null, signals = null, worldTraffic = null, drive;
 if (WORLD) {
   const model = createCityModel();
   const worldObj = buildWorld(scene, model);
   signals = createSignals(scene, model);
+  worldTraffic = createWorldTraffic(scene, model, signals);
   const collision = createCollision(model, {
     buildings: worldObj.colliders.buildings,
     obstacles: [...worldObj.obstacles, ...signals.obstacles],
@@ -148,6 +150,7 @@ const GAME_FILES = [
   'src/audio.js', 'src/smoke.js', 'src/skidmarks.js', 'src/daynight.js',
   'src/night.js', 'src/minimap.js',
   'src/citymodel.js', 'src/world.js', 'src/signals.js', 'src/collision.js',
+  'src/traffic_world.js',
   'vendor/three.module.js', 'vendor/lil-gui.module.min.js',
   'vendor/loaders/GLTFLoader.js', 'vendor/loaders/DRACOLoader.js',
   'vendor/utils/BufferGeometryUtils.js', 'vendor/utils/SkeletonUtils.js',
@@ -540,7 +543,7 @@ function loop(now) {
   last = now;
   perfTime += dt;
 
-  const st = drive.update(dt, sPos, WORLD ? null : traffic.cars);
+  const st = drive.update(dt, sPos, WORLD ? (worldTraffic && worldTraffic.cars) : traffic.cars);
   if (st) audio.resume(); // gamepad-only players never fire DOM gestures
   if (drive.consumeCameraTap()) cycleCamera();
 
@@ -556,6 +559,7 @@ function loop(now) {
   const kmh = updateCamera(dt, perfTime, st);
   if (WORLD) {
     signals.update(dt);
+    worldTraffic.update(dt, st ? st.pos : null);
   } else {
     extras.update(dt);
     traffic.update(dt);
