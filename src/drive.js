@@ -101,11 +101,17 @@ export function createDrive(curve, length, opts = {}) {
   // static world. Controllable from the first frame (no attract takeover).
   const world = opts.world || null;
   if (world) {
-    playing = true;
+    // start parked at the spawn in attract mode; first drive input takes over
     pos.set(world.spawn.pos[0], 0, world.spawn.pos[2]);
     yaw = world.spawn.yaw;
     heading.set(Math.sin(yaw), 0, Math.cos(yaw));
-    vel.copy(heading).multiplyScalar(2);
+  }
+
+  // free-roam takeover: grab the car where it's parked and roll it forward
+  function takeControlWorld() {
+    playing = true;
+    heading.set(Math.sin(yaw), 0, Math.cos(yaw));
+    vel.copy(heading).multiplyScalar(4);
   }
 
   function takeControl(attractS) {
@@ -141,8 +147,9 @@ export function createDrive(curve, length, opts = {}) {
     update(dt, attractS, trafficCars) {
       const inp = readInput();
       if (!playing) {
-        if (inp.throttle > 0.15 || inp.brake > 0.15 || Math.abs(inp.steer) > 0.4) takeControl(attractS);
-        else return null;
+        if (inp.throttle > 0.15 || inp.brake > 0.15 || Math.abs(inp.steer) > 0.4) {
+          if (world) takeControlWorld(); else takeControl(attractS);
+        } else return null;
       }
 
       // reset: back to a sane spot, facing forward, at walking pace
