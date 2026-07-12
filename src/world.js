@@ -167,6 +167,7 @@ export function buildWorld(scene, model) {
   });
 
   if (model.plaza) buildPlaza(group, model.plaza, CURB_Y);
+  buildStreetLamps(group, model);
 
   // -------------------------------------------------- distant filler
   const fillerMat = new THREE.MeshStandardMaterial({ color: 0x2b313b, roughness: 1, metalness: 0 });
@@ -219,6 +220,73 @@ function addEntrance(group, obstacles, b, m, CURB_Y) {
     obstacles.push({ x: bollard.position.x, z: bollard.position.z, r: 0.3, knocked: false,
       knock: () => { bollard.rotation.x = 1.4; bollard.position.y = CURB_Y + 0.1; } });
   }
+}
+
+// Street lamps lining every street segment. Built as instanced meshes (posts,
+// glowing heads, and a soft light-pool disc) so the whole set is a handful of
+// draw calls. Heads glow and pools fade in at night via the night registry.
+function buildStreetLamps(group, model) {
+  const { nodes, ROAD_HW, CURB_Y } = model;
+  const OFF = ROAD_HW + 1.2;   // just past the curb, on the sidewalk
+  const POST_H = 5;
+  // unit lamp modelled pointing toward -x (arm reaches over the road); each
+  // instance is yawed so the arm faces the street it lights.
+  const postG = new THREE.CylinderGeometry(0.11, 0.14, POST_H, 8); postG.translate(0, POST_H / 2, 0);
+  const armG = new THREE.BoxGeometry(1.8, 0.12, 0.12); armG.translate(-0.8, POST_H - 0.2, 0);
+  const darkGeo = mergePN([postG, armG]);
+  const headGeo = new THREE.BoxGeometry(0.52, 0.36, 0.44); headGeo.translate(-1.6, POST_H - 0.34, 0);
+  const poolGeo = new THREE.CircleGeometry(4.6, 18); poolGeo.rotateX(-Math.PI / 2); poolGeo.translate(-1.6, 0.05, 0);
+
+  const metalMat = new THREE.MeshStandardMaterial({ color: 0x33373d, roughness: 0.5, metalness: 0.7 });
+  const headMat = new THREE.MeshStandardMaterial({ color: 0x2a2418, emissive: 0xffdca0, emissiveIntensity: 0.05, roughness: 0.5 });
+  registerEmissive(headMat, 0.05, 2.6);
+  const poolMat = new THREE.MeshBasicMaterial({ color: 0xffdca0, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+  registerOpacity(poolMat, 0.0, 0.3);
+
+  const lamps = [];
+  const seg = [0.34, 0.68];
+  for (let a = 0; a < nodes.length; a++) {
+    for (let s = 0; s < nodes.length - 1; s++) {
+      for (const f of seg) {
+        const p = nodes[s] + (nodes[s + 1] - nodes[s]) * f;
+        lamps.push([nodes[a] + OFF, p, 0]);             // vertical street, +x sidewalk
+        lamps.push([nodes[a] - OFF, p, Math.PI]);        // vertical street, -x sidewalk
+        lamps.push([p, nodes[a] + OFF, -Math.PI / 2]);   // horizontal street, +z sidewalk
+        lamps.push([p, nodes[a] - OFF, Math.PI / 2]);    // horizontal street, -z sidewalk
+      }
+    }
+  }
+
+  const N = lamps.length;
+  const dark = new THREE.InstancedMesh(darkGeo, metalMat, N); dark.castShadow = true;
+  const head = new THREE.InstancedMesh(headGeo, headMat, N);
+  const pool = new THREE.InstancedMesh(poolGeo, poolMat, N); pool.renderOrder = 2;
+  const M = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), pos = new THREE.Vector3();
+  for (let i = 0; i < N; i++) {
+    const [x, z, yaw] = lamps[i];
+    q.setFromAxisAngle(up, yaw);
+    pos.set(x, CURB_Y, z);
+    M.compose(pos, q, one);
+    dark.setMatrixAt(i, M); head.setMatrixAt(i, M); pool.setMatrixAt(i, M);
+  }
+  group.add(dark); group.add(head); group.add(pool);
+}
+
+// Merge indexed geometries keeping position + normal (for untextured props).
+function mergePN(geos) {
+  const arrs = geos.map((g) => (g.index ? g.toNonIndexed() : g));
+  let vc = 0; for (const g of arrs) vc += g.attributes.position.count;
+  const pos = new Float32Array(vc * 3), nor = new Float32Array(vc * 3);
+  let o = 0;
+  for (const g of arrs) {
+    pos.set(g.attributes.position.array, o * 3);
+    nor.set(g.attributes.normal.array, o * 3);
+    o += g.attributes.position.count;
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  out.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  return out;
 }
 
 // central plaza: fountain, statue, trees, a small playground

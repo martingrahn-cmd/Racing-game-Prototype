@@ -4,9 +4,13 @@
 // crowd uses and which renders correctly). Each pedestrian holds ONE set of
 // meshes and swaps their geometry reference per frame — so a 30-frame walk costs
 // exactly the same per-frame as a 4-frame one (no per-frame skinning, no extra
-// scene objects). The cycle is foot-locked to ground speed (no sliding) and the
-// crowd scales with the day: packed at midday, sparse at night. Pedestrians
-// stroll the block sidewalks and dodge the player's car rather than be run over.
+// scene objects). The cycle is foot-locked to ground speed (no sliding).
+//
+// People walk a SIDEWALK GRAPH: block-corner nodes joined by sidewalk edges
+// (around a block) and crosswalk edges (across a street at an intersection). They
+// only step onto a crossing when that street's light is red for traffic, so they
+// cross when it's safe and otherwise keep strolling. The crowd scales with the
+// day: packed at midday, sparse at night. They also dodge the player's car.
 import * as THREE from 'three';
 import * as SkeletonUtils from '../vendor/utils/SkeletonUtils.js';
 import { makeGLTFLoader } from './car.js';
@@ -18,18 +22,18 @@ const MODELS = [
   'assets/people/woman.glb', 'assets/people/woman2.glb', 'assets/people/woman3.glb',
 ];
 const WALK = 1.25;        // m/s
+const CROSS_RUSH = 1.6;   // people hurry across crosswalks
 const DODGE_R = 5.5;
 const NFRAMES = 30;       // baked walk-cycle frames (free at runtime via geometry swap)
 const STRIDE = 1.35;      // metres travelled per full walk cycle → foot-locked, no sliding
-const DAY_CROWD = 90;     // active pedestrians at full daylight
-const NIGHT_CROWD = 26;   // active pedestrians at night
+const DAY_CROWD = 150;    // active pedestrians at full daylight
+const NIGHT_CROWD = 45;   // active pedestrians at night
 
 // Bake a full walk-cycle flipbook from one model. Clone the rig ONCE, then sample
 // NFRAMES evenly across the clip, baking each posed frame into static world-space
 // geometry (~1.72 m tall, feet at 0, centred). All frames share ONE normalising
-// transform so the character's height doesn't jitter frame-to-frame (a per-frame
-// bbox would squash any frame where a hand rises above the head). Returns an array
-// of NFRAMES frames, each an array of {geometry, material} parts.
+// transform so the character's height doesn't jitter frame-to-frame. Returns an
+// array of NFRAMES frames, each an array of {geometry, material} parts.
 function bakeFlipbook(gltf, clip, nFrames) {
   const clone = SkeletonUtils.clone(gltf.scene);
   const mixer = new THREE.AnimationMixer(clone);
@@ -69,19 +73,77 @@ function bakeFlipbook(gltf, clip, nFrames) {
   return frames;
 }
 
-export function createPedestrians(scene, model, count = DAY_CROWD) {
+// Build the sidewalk graph: a node per block corner, sidewalk edges around each
+// block, crosswalk edges across a street to the matching corner of the neighbour
+// block (tagged with the traffic axis whose red light makes the crossing safe).
+function buildSidewalkGraph(model) {
+  const { SIDEWALK } = model;
+  const m = SIDEWALK / 2;
+  const wb = model.buildings.map((b) => ({ bi: b.bi, bj: b.bj, slab: b.slab }));
+  if (model.plaza) wb.push({ bi: model.plaza.bi, bj: model.plaza.bj, slab: model.plaza });
+  const grid = {};
+  wb.forEach((b, idx) => {
+    b.idx = idx;
+    grid[`${b.bi},${b.bj}`] = b;
+    const s = b.slab;
+    // corners 0=TL 1=TR 2=BR 3=BL  (x = horizontal, z = vertical)
+    b.corners = [
+      [s.minX + m, s.minZ + m], [s.maxX - m, s.minZ + m],
+      [s.maxX - m, s.maxZ - m], [s.minX + m, s.maxZ - m],
+    ];
+  });
+
+  const nid = (idx, c) => idx * 4 + c;
+  const edges = {};
+  const add = (a, b, cross) => { (edges[a] = edges[a] || []).push({ to: b, cross }); };
+  const nb = (i, j) => grid[`${i},${j}`];
+  for (const b of wb) {
+    for (let c = 0; c < 4; c++) {
+      add(nid(b.idx, c), nid(b.idx, (c + 1) % 4), null); // sidewalk around the block
+      add(nid(b.idx, c), nid(b.idx, (c + 3) % 4), null);
+    }
+    // crosswalks across a vertical street (walking in x) → safe when N-S is red
+    const r = nb(b.bi + 1, b.bj);
+    if (r) { add(nid(b.idx, 1), nid(r.idx, 0), 'ns'); add(nid(b.idx, 2), nid(r.idx, 3), 'ns'); }
+    const l = nb(b.bi - 1, b.bj);
+    if (l) { add(nid(b.idx, 0), nid(l.idx, 1), 'ns'); add(nid(b.idx, 3), nid(l.idx, 2), 'ns'); }
+    // crosswalks across a horizontal street (walking in z) → safe when E-W is red
+    const up = nb(b.bi, b.bj - 1);
+    if (up) { add(nid(b.idx, 0), nid(up.idx, 3), 'ew'); add(nid(b.idx, 1), nid(up.idx, 2), 'ew'); }
+    const dn = nb(b.bi, b.bj + 1);
+    if (dn) { add(nid(b.idx, 3), nid(dn.idx, 0), 'ew'); add(nid(b.idx, 2), nid(dn.idx, 1), 'ew'); }
+  }
+  const pos = (id) => wb[Math.floor(id / 4)].corners[id % 4];
+  const nodeCount = wb.length * 4;
+  return { edges, pos, nodeCount };
+}
+
+export function createPedestrians(scene, model, signals, count = DAY_CROWD) {
   const group = new THREE.Group();
   scene.add(group);
-  const { SIDEWALK, CURB_Y } = model;
+  const { CURB_Y } = model;
   const peds = [];
+  const graph = buildSidewalkGraph(model);
 
-  const blocks = model.buildings.map((b) => b.slab);
-  if (model.plaza) blocks.push(model.plaza);
-  const m = SIDEWALK / 2;
-  const perim = (s) => [
-    [s.minX + m, s.minZ + m], [s.maxX - m, s.minZ + m],
-    [s.maxX - m, s.maxZ - m], [s.minX + m, s.maxZ - m],
-  ];
+  const safe = (cross) => {
+    if (!cross) return true;
+    const st = signals ? signals.getState() : null;
+    return st ? st[cross] === 'red' : false;
+  };
+  // choose the next edge from p.a: crossings only when safe, avoid U-turns,
+  // and bias toward staying on the sidewalk so people don't zig-zag the streets.
+  function chooseNext(p) {
+    const opts = (graph.edges[p.a] || []).filter((e) => safe(e.cross));
+    let pool = opts.filter((e) => e.to !== p.prev);
+    if (!pool.length) pool = opts;
+    if (!pool.length) { p.b = p.a; p.cross = null; p.len = 1; return; }
+    const weighted = [];
+    for (const e of pool) { const w = e.cross ? 1 : 3; for (let i = 0; i < w; i++) weighted.push(e); }
+    const e = weighted[Math.floor(Math.random() * weighted.length)];
+    p.prev = p.a; p.b = e.to; p.cross = e.cross;
+    const a = graph.pos(p.a), b = graph.pos(p.b);
+    p.len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+  }
 
   const loader = makeGLTFLoader();
   Promise.all(MODELS.map((p) => new Promise((res) => loader.load(p, res, undefined, () => res(null)))))
@@ -105,29 +167,27 @@ export function createPedestrians(scene, model, count = DAY_CROWD) {
           return mesh;
         });
         group.add(container);
-        peds.push({
+        const p = {
           group: container, meshes, fb, nF: fb.length, curFrame: 0,
           phase: Math.random() * fb.length,
-          slab: blocks[Math.floor(Math.random() * blocks.length)],
-          c: Math.floor(Math.random() * 4),
-          dir: Math.random() < 0.5 ? 1 : -1,
-          t: Math.random(),
-          speed: WALK * (0.8 + Math.random() * 0.5),
-          yaw: 0,
-          dodge: new THREE.Vector2(0, 0),
-          d2: 0,
-        });
+          a: Math.floor(Math.random() * graph.nodeCount), prev: -1,
+          b: 0, cross: null, len: 1, t: Math.random(),
+          base: WALK * (0.8 + Math.random() * 0.5),
+          yaw: Math.random() * Math.PI * 2,
+          dodge: new THREE.Vector2(0, 0), d2: 0,
+        };
+        chooseNext(p);
+        peds.push(p);
       }
     });
 
   return {
     update(dt, playerPos) {
       for (const p of peds) {
-        const cs = perim(p.slab);
-        const a = cs[p.c], b = cs[(p.c + p.dir + 4) % 4];
-        const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
-        p.t += p.speed * dt / len;
-        if (p.t >= 1) { p.t -= 1; p.c = (p.c + p.dir + 4) % 4; }
+        const a = graph.pos(p.a), b = graph.pos(p.b);
+        const spd = p.base * (p.cross ? CROSS_RUSH : 1);
+        p.t += spd * dt / p.len;
+        if (p.t >= 1) { p.t -= 1; p.a = p.b; chooseNext(p); }
         const px = a[0] + (b[0] - a[0]) * p.t;
         const pz = a[1] + (b[1] - a[1]) * p.t;
 
@@ -152,7 +212,7 @@ export function createPedestrians(scene, model, count = DAY_CROWD) {
         p.group.rotation.y = p.yaw;
 
         // foot-locked flipbook: one full cycle per STRIDE metres travelled
-        p.phase += (p.speed * dt / STRIDE) * p.nF;
+        p.phase += (spd * dt / STRIDE) * p.nF;
         const idx = Math.floor(p.phase) % p.nF;
         if (idx !== p.curFrame) {
           const parts = p.fb[idx];
