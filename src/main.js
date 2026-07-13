@@ -13,6 +13,7 @@ import { createAudio } from './audio.js';
 import { createSmoke } from './smoke.js';
 import { createSkidmarks } from './skidmarks.js';
 import { createDayNight } from './daynight.js';
+import { getDayness } from './night.js';
 import { createMinimap } from './minimap.js';
 import { createCityModel } from './citymodel.js';
 import { buildWorld } from './world.js';
@@ -661,6 +662,20 @@ function loop(now) {
   daynight.update(dt);
   const kmh = updateCamera(dt, perfTime, st);
   if (WORLD) {
+    // Night-adaptive draw distance on mobile: the killer view is a long straight
+    // avenue after dark, where you see the maximum depth of dense, emissive city
+    // at once (GPU fill + geometry bound). At night the far end is dark and the
+    // fog already tracks the horizon colour, so pulling the far plane in reads as
+    // night atmosphere — not grey haze — while cutting triangles, draw calls AND
+    // overdraw together. Day keeps the longer distance (no emissive/pool fill, so
+    // it can afford it). fog.far stays below camera.far so nothing pops (#102).
+    if (MOBILE) {
+      const day = getDayness();                 // 1 = noon, 0 = midnight
+      const far = 250 + 130 * day;              // 250 m at night → 380 m by day
+      scene.fog.far = 200 + 140 * day;          // 200 m → 340 m (always < camera.far)
+      scene.fog.near = 70 + 15 * day;
+      if (Math.abs(camera.far - far) > 2) { camera.far = far; camera.updateProjectionMatrix(); }
+    }
     signals.update(dt);
     if (worldGeom) { worldGeom.updateDoors(dt, st ? st.pos : null); worldGeom.updateClock(daynight.params.timeOfDay); lodStat = worldGeom.updateLOD(camera.position); }
     if (worldCollision) worldCollision.update(dt, st ? st.pos : null);
