@@ -616,6 +616,7 @@ const ATTRACT_PROMPT = 'GASA FÖR ATT KÖRA — ↑ / W ELLER RT PÅ HANDKONTROL
 let promptTimer = 0;
 let fpsAcc = 0, fpsN = 0, fpsTimer = 0;
 let msUpd = 0, msRender = 0, fpsInst = 60; // smoothed profiling
+let lodStat = null; // {near,total} building-LOD detail cells
 
 // ------------------------------------------------------------ main loop
 let perfTime = 0;
@@ -650,7 +651,7 @@ function loop(now) {
   const kmh = updateCamera(dt, perfTime, st);
   if (WORLD) {
     signals.update(dt);
-    if (worldGeom) { worldGeom.updateDoors(dt, st ? st.pos : null); worldGeom.updateClock(daynight.params.timeOfDay); worldGeom.updateLOD(camera.position); }
+    if (worldGeom) { worldGeom.updateDoors(dt, st ? st.pos : null); worldGeom.updateClock(daynight.params.timeOfDay); lodStat = worldGeom.updateLOD(camera.position); }
     if (worldCollision) worldCollision.update(dt, st ? st.pos : null);
     worldTraffic.update(dt, st ? st.pos : null);
     if (pedestrians) pedestrians.update(dt, st ? st.pos : null);
@@ -696,7 +697,7 @@ function loop(now) {
   }
   fpsAcc += rawDt; fpsN++; fpsTimer += dt;
   if (fpsTimer > 0.5) {
-    elFps.textContent = `${Math.round(fpsN / fpsAcc)}fps · t${tier}${postEnabled ? '+P' : ''} · ${renderer.info.render.calls}dc ${(renderer.info.render.triangles / 1e6).toFixed(1)}M · cpu ${(msUpd + msRender).toFixed(0)} (u${msUpd.toFixed(0)}/r${msRender.toFixed(0)})`;
+    elFps.textContent = `${Math.round(fpsN / fpsAcc)}fps · t${tier}${postEnabled ? '+P' : ''} · ${renderer.info.render.calls}dc ${(renderer.info.render.triangles / 1e6).toFixed(1)}M${lodStat ? ` · lod ${lodStat.near}/${lodStat.total}` : ''} · cpu ${(msUpd + msRender).toFixed(0)} (u${msUpd.toFixed(0)}/r${msRender.toFixed(0)})`;
     const cp = st ? st.pos : carGround;
     elCoords.textContent = `x ${cp.x.toFixed(0)} · z ${cp.z.toFixed(0)} · s ${Math.round(sPos)} m · ${daynight.params.timeOfDay.toFixed(2)}`;
     // the hint row follows the active input device
