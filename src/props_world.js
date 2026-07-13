@@ -257,30 +257,41 @@ export function createProps(scene, model) {
         }
         return;
       }
-      const partIms = [];
-      for (const part of parts) {
-        const im = new THREE.InstancedMesh(part.geometry, part.material, list.length);
-        im.castShadow = true;
-        const M = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
-        for (let i = 0; i < list.length; i++) {
-          q.setFromAxisAngle(up, list[i].yaw);
-          p.set(list[i].x, CURB_Y, list[i].z);
-          M.compose(p, q, one);
-          im.setMatrixAt(i, M);
-          if (cols) im.setColorAt(i, cols[i]);
-        }
-        if (im.instanceColor) im.instanceColor.needsUpdate = true;
-        partIms.push(im);
-        group.add(im);
+      // Loose props (knock-flying) also chunk into spatial cells so distant cells
+      // frustum-cull — bicycles alone were ~1750 × 1714 tris ≈ 3M drawn every
+      // frame from a single map-spanning InstancedMesh (#98). The flying mechanic
+      // works per-cell: one looseGroup per cell, objs indexed into that cell's
+      // InstancedMeshes (local index), so knock-flying is unchanged.
+      const r = key === 'bench' ? 1.5 : key === 'barrier' ? 1.3 : key === 'bicycle' ? 1.1
+        : (key === 'hydrant' || key === 'cone') ? 0.7 : 0.95;
+      const hit2 = (CAR_R + r) * (CAR_R + r);
+      const LOOSE_CHUNK = 140;
+      const cells = new Map();
+      for (let i = 0; i < list.length; i++) {
+        const ck = Math.floor(list[i].x / LOOSE_CHUNK) + ',' + Math.floor(list[i].z / LOOSE_CHUNK);
+        let arr = cells.get(ck); if (!arr) { arr = []; cells.set(ck, arr); } arr.push(i);
       }
-      if (LOOSE.has(key)) {
-        const r = key === 'bench' ? 1.5 : key === 'barrier' ? 1.3 : key === 'bicycle' ? 1.1
-          : (key === 'hydrant' || key === 'cone') ? 0.7 : 0.95;
-        const hit2 = (CAR_R + r) * (CAR_R + r);
-        for (const im of partIms) im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      const M = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
+      for (const idx of cells.values()) {
+        const partIms = [];
+        for (const part of parts) {
+          const im = new THREE.InstancedMesh(part.geometry, part.material, idx.length);
+          im.castShadow = true;
+          im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+          for (let j = 0; j < idx.length; j++) {
+            const i = idx[j];
+            q.setFromAxisAngle(up, list[i].yaw); p.set(list[i].x, CURB_Y, list[i].z); M.compose(p, q, one);
+            im.setMatrixAt(j, M);
+            if (cols) im.setColorAt(j, cols[i]);
+          }
+          if (im.instanceColor) im.instanceColor.needsUpdate = true;
+          im.computeBoundingSphere();
+          partIms.push(im);
+          group.add(im);
+        }
         looseGroups.push({
           ims: partIms,
-          objs: list.map((it, i) => ({ i, x: it.x, z: it.z, yaw: it.yaw, hit2, launched: false, rested: false })),
+          objs: idx.map((i, j) => ({ i: j, x: list[i].x, z: list[i].z, yaw: list[i].yaw, hit2, launched: false, rested: false })),
         });
       }
     }, undefined, () => { /* skip a prop that fails to load */ });
