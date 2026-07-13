@@ -14,8 +14,11 @@ import { makeGLTFLoader, rigWheels } from './car.js';
 const CRUISE = 11;          // m/s ≈ 40 km/h
 const ACCEL = 7, DECEL = 20;
 const CAR_LEN = 4.3;
-const DAY_CARS = 96;        // pool size at full daylight (4× map; frustum-culled off-screen)
-const NIGHT_CARS = 36;      // rendered cars at night
+// touch devices run a much lighter fleet — each car is an animated group, so
+// the count drives CPU + draw cost directly
+const MOBILE = ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0;
+const DAY_CARS = MOBILE ? 30 : 96;    // pool size at full daylight (4× map; frustum-culled off-screen)
+const NIGHT_CARS = MOBILE ? 14 : 36;  // rendered cars at night
 const MODELS = [
   'assets/traffic/taxi.glb', 'assets/traffic/sedan1.glb', 'assets/traffic/sedan2.glb',
   'assets/traffic/suv.glb', 'assets/traffic/sports1.glb', 'assets/traffic/sports2.glb',
