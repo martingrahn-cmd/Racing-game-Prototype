@@ -8,8 +8,52 @@
 // Lane convention matches the player spawn: travelling +z runs in the x=node-LANE
 // lane, so same-direction traffic is followed, oncoming traffic is on the far side.
 import * as THREE from 'three';
+import { mergeGeometries } from '../vendor/utils/BufferGeometryUtils.js';
 import { getDayness } from './night.js';
 import { makeGLTFLoader, rigWheels } from './car.js';
+
+// Merge a car's sub-meshes that share a material into one mesh each, baked into
+// the holder's local space. A GLB car is ~12 separate meshes = 12 draw calls;
+// on the iPhone (draw-call bound) a fleet of those dominated the frame. Merged
+// by material it's ~6 draws and moves/rotates identically as the container's
+// child. Trades per-wheel spin (imperceptible on distant traffic) for half the
+// draws; the player's own car keeps its rig (#105).
+function mergeCarByMaterial(holder) {
+  holder.updateMatrixWorld(true);
+  const inv = holder.matrixWorld.clone().invert();
+  const meshes = [];
+  holder.traverse((o) => { if (o.isMesh && o.geometry) meshes.push(o); });
+  const byMat = new Map();      // material -> [geometry baked to holder space]
+  const local = new THREE.Matrix4();
+  for (const m of meshes) {
+    const mats = Array.isArray(m.material) ? m.material : [m.material];
+    const src = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+    // keep only the attributes every car mesh reliably shares, so the merge
+    // never bails on a mismatched attribute set
+    for (const name of Object.keys(src.attributes)) {
+      if (name !== 'position' && name !== 'normal' && name !== 'uv') src.deleteAttribute(name);
+    }
+    if (!src.attributes.normal) src.computeVertexNormals();
+    if (!src.attributes.uv) {
+      const n = src.attributes.position.count;
+      src.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(n * 2), 2));
+    }
+    local.copy(inv).multiply(m.matrixWorld);
+    src.applyMatrix4(local);
+    src.clearGroups();
+    const mat = mats[0];
+    let arr = byMat.get(mat); if (!arr) { arr = []; byMat.set(mat, arr); }
+    arr.push(src);
+  }
+  for (const c of holder.children.slice()) holder.remove(c);
+  for (const [mat, geos] of byMat) {
+    const merged = geos.length === 1 ? geos[0] : mergeGeometries(geos, false);
+    if (!merged) continue;
+    const mesh = new THREE.Mesh(merged, mat);
+    mesh.castShadow = true;
+    holder.add(mesh);
+  }
+}
 
 const CRUISE = 11;          // m/s ≈ 40 km/h
 const ACCEL = 7, DECEL = 20;
@@ -170,11 +214,10 @@ export function createWorldTraffic(scene, model, signals, count = DAY_CARS) {
       });
       o.material = Array.isArray(o.material) ? out : out[0];
     });
+    mergeCarByMaterial(holder);   // 12 meshes -> ~6 draws (drops wheel spin on traffic)
     car.group.remove(car.placeholder);
     car.group.add(holder);
-    car.rig = (rig.spinNodes && rig.spinNodes.length)
-      ? { spinNodes: rig.spinNodes, radius: rig.radius * scale, forwardSign: rig.forwardSign }
-      : null;
+    car.rig = null;               // wheels are merged into the body now — no spin nodes
     car.applied = true;
   }
 
