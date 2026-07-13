@@ -472,11 +472,15 @@ function buildVillas(group, spots, CURB_Y) {
 
 // Per-house front gardens: for every street-facing villa, a low fence around a
 // front garden with a driveway gap, a garage on the driveway side, a paved
-// driveway, and 0/1/2 cars parked on it (#79). Returns the parked-car spots.
+// driveway, and 0/1/2 cars parked on it (#79). Fully INSTANCED — at a 4× map
+// this is thousands of houses, so each kind of piece (fence, garage body/door/
+// roof, driveway, hedge) is drawn as a single InstancedMesh. Returns the
+// parked-car spots.
 function buildVillaGardens(group, spots, CURB_Y, mats) {
-  const { fenceMat, garageWall, garageDoor, garageRoof, hedgeMat, hedgeGeo } = mats;
+  const { fenceMat, garageWall, garageDoor, garageRoof, hedgeMat } = mats;
   const driveMat = new THREE.MeshStandardMaterial({ color: 0x6a6a6f, roughness: 0.95, metalness: 0 });
   const parkedSpots = [];
+  const fences = [], drives = [], hedges = [], garages = [];   // collected placements
   const FH = 0.9, halfW = 6.2, front = 5.0, gapH = 2.0;
   for (const s of spots) {
     if (!s.edge || !s.out) continue;
@@ -491,39 +495,58 @@ function buildVillaGardens(group, spots, CURB_Y, mats) {
     const seg = (c0, c1) => {
       const len = Math.abs(c1 - c0); if (len < 0.3) return;
       const mid = (c0 + c1) / 2;
-      const f = new THREE.Mesh(new THREE.BoxGeometry(Math.abs(ax) * len + 0.13, FH, Math.abs(az) * len + 0.13), fenceMat);
-      f.position.set(fx + ax * mid, CURB_Y + FH / 2, fz + az * mid); f.castShadow = true; group.add(f);
+      fences.push({ x: fx + ax * mid, z: fz + az * mid, sx: Math.abs(ax) * len + 0.13, sz: Math.abs(az) * len + 0.13 });
     };
     seg(-halfW, gapC - gapH); seg(gapC + gapH, halfW);
     // two side fences running back from the front corners toward the house
     const backLen = front + 1.2;
     for (const cs of [-1, 1]) {
       const c0x = fx + ax * (cs * halfW), c0z = fz + az * (cs * halfW);
-      const f = new THREE.Mesh(new THREE.BoxGeometry(Math.abs(ox) * backLen + 0.13, FH, Math.abs(oz) * backLen + 0.13), fenceMat);
-      f.position.set(c0x - ox * backLen / 2, CURB_Y + FH / 2, c0z - oz * backLen / 2); f.castShadow = true; group.add(f);
+      fences.push({ x: c0x - ox * backLen / 2, z: c0z - oz * backLen / 2, sx: Math.abs(ox) * backLen + 0.13, sz: Math.abs(oz) * backLen + 0.13 });
     }
     // a shrub or two in the garden
     for (let h = 0; h < 2; h++) {
-      const hb = new THREE.Mesh(hedgeGeo, hedgeMat);
-      hb.scale.set(1.1, 0.8, 1.1);
-      hb.position.set(s.x + ax * (-side * (halfW - 2)) + ox * (1.5 + h * 1.6), CURB_Y + 0.4, s.z + az * (-side * (halfW - 2)) + oz * (1.5 + h * 1.6));
-      hb.castShadow = true; group.add(hb);
+      hedges.push({ x: s.x + ax * (-side * (halfW - 2)) + ox * (1.5 + h * 1.6), z: s.z + az * (-side * (halfW - 2)) + oz * (1.5 + h * 1.6) });
     }
     // garage on the driveway side, door facing the street
     const grx = s.x + ax * (side * (halfW - 1.6)), grz = s.z + az * (side * (halfW - 1.6));
     const gyaw = Math.atan2(ox, oz);
-    const gar = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.BoxGeometry(4.4, 2.7, 4.4), garageWall); body.position.y = 1.35; body.castShadow = true; body.receiveShadow = true; gar.add(body);
-    const door = new THREE.Mesh(new THREE.BoxGeometry(3.0, 2.0, 0.12), garageDoor); door.position.set(0, 1.0, 2.26); gar.add(door);
-    const roof = new THREE.Mesh(new THREE.ConeGeometry(3.5, 1.3, 4), garageRoof); roof.rotation.y = Math.PI / 4; roof.position.y = 3.35; roof.castShadow = true; gar.add(roof);
-    gar.position.set(grx, CURB_Y, grz); gar.rotation.y = gyaw; group.add(gar);
+    garages.push({ x: grx, z: grz, yaw: gyaw });
     // paved driveway from the garage out to the street gap
     const dl = front + 3;
-    const drv = new THREE.Mesh(new THREE.BoxGeometry(Math.abs(ox) * dl + Math.abs(ax) * 3.4, 0.05, Math.abs(oz) * dl + Math.abs(az) * 3.4), driveMat);
-    drv.position.set(grx + ox * (dl / 2 - 1), CURB_Y + 0.05, grz + oz * (dl / 2 - 1)); drv.receiveShadow = true; group.add(drv);
+    drives.push({ x: grx + ox * (dl / 2 - 1), z: grz + oz * (dl / 2 - 1), sx: Math.abs(ox) * dl + Math.abs(ax) * 3.4, sz: Math.abs(oz) * dl + Math.abs(az) * 3.4 });
     // 0, 1 or 2 cars on the driveway (weighted)
     const r = rnd(); const nCars = r < 0.32 ? 0 : r < 0.72 ? 1 : 2;
     for (let c = 0; c < nCars; c++) parkedSpots.push({ x: grx + ox * (2.6 + c * 3.0), z: grz + oz * (2.6 + c * 3.0), yaw: gyaw });
+  }
+  // --- draw each collected kind as one InstancedMesh ---
+  const instScaled = (items, mat, hy, y, cast) => {
+    if (!items.length) return;
+    const im = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), mat, items.length);
+    im.castShadow = cast; im.receiveShadow = !cast;
+    const M = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), sc = new THREE.Vector3();
+    for (let i = 0; i < items.length; i++) { p.set(items[i].x, y, items[i].z); sc.set(items[i].sx, hy, items[i].sz); M.compose(p, q, sc); im.setMatrixAt(i, M); }
+    group.add(im);
+  };
+  instScaled(fences, fenceMat, FH, CURB_Y + FH / 2, true);
+  instScaled(drives, driveMat, 0.06, CURB_Y + 0.05, false);
+  if (hedges.length) {
+    const im = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), hedgeMat, hedges.length);
+    im.castShadow = true; im.receiveShadow = true;
+    const M = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), sc = new THREE.Vector3(1.1, 0.8, 1.1);
+    for (let i = 0; i < hedges.length; i++) { p.set(hedges[i].x, CURB_Y + 0.4, hedges[i].z); M.compose(p, q, sc); im.setMatrixAt(i, M); }
+    group.add(im);
+  }
+  if (garages.length) {
+    const bodyGeo = new THREE.BoxGeometry(4.4, 2.7, 4.4); bodyGeo.translate(0, 1.35, 0);
+    const doorGeo = new THREE.BoxGeometry(3.0, 2.0, 0.12); doorGeo.translate(0, 1.0, 2.26);
+    const roofGeo = new THREE.ConeGeometry(3.5, 1.3, 4); roofGeo.rotateY(Math.PI / 4); roofGeo.translate(0, 3.35, 0);
+    for (const [geo, mat, cast] of [[bodyGeo, garageWall, true], [doorGeo, garageDoor, false], [roofGeo, garageRoof, true]]) {
+      const im = new THREE.InstancedMesh(geo, mat, garages.length); im.castShadow = cast;
+      const M = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
+      for (let i = 0; i < garages.length; i++) { q.setFromAxisAngle(up, garages[i].yaw); p.set(garages[i].x, CURB_Y, garages[i].z); M.compose(p, q, one); im.setMatrixAt(i, M); }
+      group.add(im);
+    }
   }
   return parkedSpots;
 }
