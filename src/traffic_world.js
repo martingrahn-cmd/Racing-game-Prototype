@@ -14,8 +14,8 @@ import { makeGLTFLoader, rigWheels } from './car.js';
 const CRUISE = 11;          // m/s ≈ 40 km/h
 const ACCEL = 7, DECEL = 20;
 const CAR_LEN = 4.3;
-const DAY_CARS = 60;        // pool size at full daylight (bigger map; frustum-culled off-screen)
-const NIGHT_CARS = 22;      // rendered cars at night
+const DAY_CARS = 96;        // pool size at full daylight (4× map; frustum-culled off-screen)
+const NIGHT_CARS = 36;      // rendered cars at night
 const MODELS = [
   'assets/traffic/taxi.glb', 'assets/traffic/sedan1.glb', 'assets/traffic/sedan2.glb',
   'assets/traffic/suv.glb', 'assets/traffic/sports1.glb', 'assets/traffic/sports2.glb',
