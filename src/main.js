@@ -617,6 +617,7 @@ let promptTimer = 0;
 let fpsAcc = 0, fpsN = 0, fpsTimer = 0;
 let msUpd = 0, msRender = 0, fpsInst = 60; // smoothed profiling
 let lodStat = null; // {near,total} building-LOD detail cells
+let dbgScanTimer = 0, dbgBig = ''; // heaviest visible geometry (debug)
 
 // ------------------------------------------------------------ main loop
 let perfTime = 0;
@@ -695,9 +696,27 @@ function loop(now) {
   } else if (drive.playing && promptTimer <= 0 && elPrompt.textContent === ATTRACT_PROMPT) {
     elPrompt.textContent = '';
   }
+  // periodic scene scan (debug): name the heaviest visible geometry so a phone
+  // screenshot points at whatever is eating the triangle budget
+  dbgScanTimer += dt;
+  if (WORLD && dbgScanTimer > 2) {
+    dbgScanTimer = 0;
+    const agg = {};
+    scene.traverse((o) => {
+      if (!(o.isMesh || o.isInstancedMesh)) return;
+      let vis = o.visible, pp = o.parent; while (vis && pp) { vis = pp.visible; pp = pp.parent; }
+      if (!vis) return;
+      const g = o.geometry; if (!g || !g.attributes || !g.attributes.position) return;
+      const per = (g.index ? g.index.count : g.attributes.position.count) / 3;
+      const inst = o.isInstancedMesh ? o.count : 1;
+      const key = Math.round(per) + (o.isInstancedMesh ? ('x' + o.count) : 'm');
+      agg[key] = (agg[key] || 0) + per * inst;
+    });
+    dbgBig = Object.entries(agg).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => Math.round(v / 1000) + 'k·' + k).join(' ');
+  }
   fpsAcc += rawDt; fpsN++; fpsTimer += dt;
   if (fpsTimer > 0.5) {
-    elFps.textContent = `${Math.round(fpsN / fpsAcc)}fps · t${tier}${postEnabled ? '+P' : ''} · ${renderer.info.render.calls}dc ${(renderer.info.render.triangles / 1e6).toFixed(1)}M${lodStat ? ` · lod ${lodStat.near}/${lodStat.total}` : ''} · cpu ${(msUpd + msRender).toFixed(0)} (u${msUpd.toFixed(0)}/r${msRender.toFixed(0)})`;
+    elFps.textContent = `${Math.round(fpsN / fpsAcc)}fps t${tier}${postEnabled ? '+P' : ''} ${renderer.info.render.calls}dc ${(renderer.info.render.triangles / 1e6).toFixed(1)}M${lodStat ? ` lod${lodStat.near}/${lodStat.total}` : ''} cpu${(msUpd + msRender).toFixed(0)}(${msUpd.toFixed(0)}/${msRender.toFixed(0)})${dbgBig ? ' » ' + dbgBig : ''}`;
     const cp = st ? st.pos : carGround;
     elCoords.textContent = `x ${cp.x.toFixed(0)} · z ${cp.z.toFixed(0)} · s ${Math.round(sPos)} m · ${daynight.params.timeOfDay.toFixed(2)}`;
     // the hint row follows the active input device
