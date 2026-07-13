@@ -34,8 +34,8 @@ const CROSS_RUSH = 1.6;   // people hurry across crosswalks
 const DODGE_R = 5.5;
 const NFRAMES = 30;       // baked walk-cycle frames (free at runtime via geometry swap)
 const STRIDE = 1.35;      // metres travelled per full walk cycle → foot-locked, no sliding
-const DAY_CROWD = 300;    // pool size at full daylight (bigger map; nearest render)
-const NIGHT_CROWD = 90;   // active pedestrians at night
+const DAY_CROWD = 460;    // pool size at full daylight (4× map; nearest render)
+const NIGHT_CROWD = 150;  // active pedestrians at night
 
 // Bake a full walk-cycle flipbook from one model. Clone the rig ONCE, then sample
 // NFRAMES evenly across the clip, baking each posed frame into static world-space

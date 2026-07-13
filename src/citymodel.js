@@ -11,7 +11,7 @@ const LANE = 3.5;         // lane centre offset (right-hand traffic)
 const SIDEWALK = 4.5;     // sidewalk depth between curb and building
 const CURB_Y = 0.18;      // curb / sidewalk height
 const PITCH = 100;        // spacing between intersections
-const BLOCKS = 9;         // blocks per axis (odd → a true centre block for the plaza); ~900 m district
+const BLOCKS = 17;        // blocks per axis (odd → a true centre block for the plaza); ~1700 m district (~4× the area)
 
 export function createCityModel() {
   const half = BLOCKS / 2;
