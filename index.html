@@ -85,7 +85,7 @@
     border: 1px solid rgba(255,255,255,0.3);
     background: rgba(16,20,28,0.45); color: #fff;
     font-size: 19px; font-weight: 800; cursor: pointer;
-    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    /* no backdrop-filter: blur — it re-blurs the animating canvas every frame (iOS frame-killer) */
   }
   #controls button:active { background: rgba(255,217,74,0.5); }
 
@@ -93,14 +93,14 @@
     position: fixed; left: 18px; bottom: max(52px, calc(env(safe-area-inset-bottom) + 40px));
     width: 150px; height: 150px; pointer-events: none;
     background: rgba(10,14,20,0.35); border-radius: 50%;
-    backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px);
+    /* no backdrop-filter (perf) */
   }
   @media (max-width: 700px) { #minimap { width: 110px; height: 110px; } }
 
   #bugReport {
     position: fixed; inset: 0; z-index: 20; display: flex;
     align-items: center; justify-content: center;
-    background: rgba(6,8,12,0.72); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+    background: rgba(6,8,12,0.82);
   }
   #bugReport.bug-hidden { display: none; }
   #bugReport .bug-card {
@@ -149,7 +149,7 @@
     position: absolute; left: 16px; bottom: calc(16px + env(safe-area-inset-bottom));
     width: min(46vw, 320px); height: 94px; border-radius: 20px;
     background: rgba(16,20,28,0.42); border: 1px solid rgba(255,255,255,0.22);
-    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    /* no backdrop-filter: blur — it re-blurs the animating canvas every frame (iOS frame-killer) */
     display: flex; align-items: center; justify-content: center; overflow: hidden;
   }
   #steerPad.pressed { background: rgba(255,217,74,0.14); }
@@ -163,7 +163,7 @@
     position: absolute; left: 16px; bottom: calc(122px + env(safe-area-inset-bottom));
     width: 50px; height: 50px; border-radius: 50%; font-size: 20px;
     background: rgba(16,20,28,0.5); border: 1px solid rgba(255,255,255,0.28);
-    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    /* no backdrop-filter: blur — it re-blurs the animating canvas every frame (iOS frame-killer) */
   }
   #pedals {
     position: absolute; right: 14px; bottom: calc(14px + env(safe-area-inset-bottom));
@@ -174,7 +174,7 @@
   .tbtn {
     border: 1px solid rgba(255,255,255,0.28); background: rgba(16,20,28,0.5);
     border-radius: 50%; display: flex; align-items: center; justify-content: center;
-    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    /* no backdrop-filter: blur — it re-blurs the animating canvas every frame (iOS frame-killer) */
   }
   .tbtn.gas { width: 106px; height: 106px; font-size: 18px; background: rgba(53,208,127,0.26); border-color: rgba(53,208,127,0.6); }
   .tbtn.brake { width: 88px; height: 88px; font-size: 14px; background: rgba(255,90,60,0.24); border-color: rgba(255,90,60,0.55); }
