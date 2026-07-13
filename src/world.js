@@ -328,19 +328,28 @@ function buildStreetLamps(group, model) {
     }
   }
 
-  const N = lamps.length;
-  const dark = new THREE.InstancedMesh(darkGeo, metalMat, N); dark.castShadow = true;
-  const head = new THREE.InstancedMesh(headGeo, headMat, N);
-  const pool = new THREE.InstancedMesh(poolGeo, poolMat, N); pool.renderOrder = 2;
+  // Chunk the lamps into cells so each InstancedMesh frustum-culls. The soft
+  // ground light-pool disc is ADDITIVE with depthWrite off — a single
+  // map-spanning InstancedMesh submitted all ~2450 discs every frame, and at
+  // night (opacity up) that overdraw was the dominant GPU cost, view-independent
+  // (#103). Chunked, only the handful of nearby cells rasterise. The pools also
+  // hide entirely by day, when they fade to invisible but still cost fill.
   const M = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), pos = new THREE.Vector3();
-  for (let i = 0; i < N; i++) {
-    const [x, z, yaw] = lamps[i];
-    q.setFromAxisAngle(up, yaw);
-    pos.set(x, CURB_Y, z);
-    M.compose(pos, q, one);
-    dark.setMatrixAt(i, M); head.setMatrixAt(i, M); pool.setMatrixAt(i, M);
+  const cells = new Map();
+  for (const l of lamps) { const k = Math.floor(l[0] / CLUTTER_CHUNK) + ',' + Math.floor(l[1] / CLUTTER_CHUNK); let a = cells.get(k); if (!a) { a = []; cells.set(k, a); } a.push(l); }
+  const pools = [];
+  for (const arr of cells.values()) {
+    const dark = new THREE.InstancedMesh(darkGeo, metalMat, arr.length); dark.castShadow = true;
+    const head = new THREE.InstancedMesh(headGeo, headMat, arr.length);
+    const pool = new THREE.InstancedMesh(poolGeo, poolMat, arr.length); pool.renderOrder = 2;
+    for (let i = 0; i < arr.length; i++) {
+      const [x, z, yaw] = arr[i]; q.setFromAxisAngle(up, yaw); pos.set(x, CURB_Y, z); M.compose(pos, q, one);
+      dark.setMatrixAt(i, M); head.setMatrixAt(i, M); pool.setMatrixAt(i, M);
+    }
+    dark.computeBoundingSphere(); head.computeBoundingSphere(); pool.computeBoundingSphere();
+    group.add(dark); group.add(head); group.add(pool); pools.push(pool);
   }
-  group.add(dark); group.add(head); group.add(pool);
+  registerCustom((d) => { const on = d < 0.82; for (const p of pools) p.visible = on; }); // no ground pools by day
 }
 
 // A residential block is ringed with apartment buildings facing the streets.
