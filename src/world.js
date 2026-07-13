@@ -664,12 +664,25 @@ function buildParkedCars(group, spots, CURB_Y) {
       .multiply(new THREE.Matrix4().makeTranslation(-(box.min.x + box.max.x) / 2, -box.min.y, -(box.min.z + box.max.z) / 2));
     const parts = [];
     gltf.scene.traverse((o) => { if (o.isMesh) { const g = o.geometry.clone(); g.applyMatrix4(o.matrixWorld); g.applyMatrix4(N); parts.push({ geometry: g, material: o.material }); } });
-    for (const part of parts) {
-      const im = new THREE.InstancedMesh(part.geometry, part.material, spots.length);
-      im.castShadow = true; im.receiveShadow = true;
-      const M = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
-      for (let i = 0; i < spots.length; i++) { q.setFromAxisAngle(up, spots[i].yaw); p.set(spots[i].x, CURB_Y, spots[i].z); M.compose(p, q, one); im.setMatrixAt(i, M); }
-      group.add(im);
+    // Bucket the parked-car spots into CHUNK cells so each cell's InstancedMesh
+    // gets a tight bounding sphere and frustum-culls. A single map-spanning
+    // InstancedMesh (2000+ sedans × ~2800 tris) never culls and drew ~7M
+    // triangles every frame regardless of where the camera looked (#98).
+    const cells = new Map();
+    for (const s of spots) {
+      const key = Math.floor(s.x / CHUNK) + ',' + Math.floor(s.z / CHUNK);
+      let arr = cells.get(key); if (!arr) { arr = []; cells.set(key, arr); }
+      arr.push(s);
+    }
+    const M = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
+    for (const arr of cells.values()) {
+      for (const part of parts) {
+        const im = new THREE.InstancedMesh(part.geometry, part.material, arr.length);
+        im.castShadow = true; im.receiveShadow = true;
+        for (let i = 0; i < arr.length; i++) { q.setFromAxisAngle(up, arr[i].yaw); p.set(arr[i].x, CURB_Y, arr[i].z); M.compose(p, q, one); im.setMatrixAt(i, M); }
+        im.computeBoundingSphere();
+        group.add(im);
+      }
     }
   }, undefined, () => { /* skip parked cars if the model fails */ });
 }
