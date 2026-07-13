@@ -615,6 +615,7 @@ const CAM_NAMES = ['CHASE', 'BUMPER', 'HELI', 'TV', 'PHOTO'];
 const ATTRACT_PROMPT = 'GASA FÖR ATT KÖRA — ↑ / W ELLER RT PÅ HANDKONTROLL';
 let promptTimer = 0;
 let fpsAcc = 0, fpsN = 0, fpsTimer = 0;
+let msUpd = 0, msRender = 0, fpsInst = 60; // smoothed profiling
 
 // ------------------------------------------------------------ main loop
 let perfTime = 0;
@@ -624,9 +625,12 @@ let firstFrame = true;
 function loop(now) {
   requestAnimationFrame(loop);
   renderer.info.reset(); // count draw calls / triangles across every pass this frame
-  let dt = Math.min((now - last) / 1000, 0.1);
+  const rawDt = (now - last) / 1000;  // true frame time — for honest fps + profiling
+  let dt = Math.min(rawDt, 0.1);
   last = now;
   perfTime += dt;
+  if (rawDt > 0) fpsInst += (Math.min(1 / rawDt, 240) - fpsInst) * 0.1;
+  const _t0 = performance.now();
 
   const st = drive.update(dt, sPos, WORLD ? (worldTraffic && worldTraffic.cars) : traffic.cars);
   if (st) audio.resume(); // gamepad-only players never fire DOM gestures
@@ -662,12 +666,16 @@ function loop(now) {
   audio.update(st, dt);
   if (!WORLD) minimap.update(st ? st.pos : carGround, st ? st.yaw : Math.atan2(dirVec.x, dirVec.z), traffic.cars);
   autoQuality(dt);
+  const _t1 = performance.now();
   if (postEnabled) {
     const sf = (kmh - 90) / 210;
     post.render(scene, camera, camMode === 3 ? 0 : sf, perfTime);
   } else {
     renderer.render(scene, camera);
   }
+  const _t2 = performance.now();
+  msUpd += (_t1 - _t0 - msUpd) * 0.12;      // CPU time in game/update logic
+  msRender += (_t2 - _t1 - msRender) * 0.12; // CPU time submitting the render
   if (photoRequested) { // same task as the render: the buffer is still intact
     photoRequested = false;
     takePhoto(st);
@@ -686,9 +694,9 @@ function loop(now) {
   } else if (drive.playing && promptTimer <= 0 && elPrompt.textContent === ATTRACT_PROMPT) {
     elPrompt.textContent = '';
   }
-  fpsAcc += dt; fpsN++; fpsTimer += dt;
+  fpsAcc += rawDt; fpsN++; fpsTimer += dt;
   if (fpsTimer > 0.5) {
-    elFps.textContent = `${Math.round(fpsN / fpsAcc)} FPS`;
+    elFps.textContent = `${Math.round(fpsN / fpsAcc)} FPS · cpu ${(msUpd + msRender).toFixed(0)}ms (u${msUpd.toFixed(0)}/r${msRender.toFixed(0)})`;
     const cp = st ? st.pos : carGround;
     elCoords.textContent = `x ${cp.x.toFixed(0)} · z ${cp.z.toFixed(0)} · s ${Math.round(sPos)} m · ${daynight.params.timeOfDay.toFixed(2)}`;
     // the hint row follows the active input device
@@ -712,6 +720,7 @@ function loop(now) {
     sun: +sun.intensity.toFixed(2), hemi: +hemi.intensity.toFixed(2),
     tris: renderer.info.render.triangles,
     calls: renderer.info.render.calls,
+    fps: Math.round(fpsInst), msUpd: +msUpd.toFixed(1), msRender: +msRender.toFixed(1),
     cars: worldTraffic ? worldTraffic.cars.length : 0,
     carsUp: worldTraffic ? worldTraffic.cars.filter((c) => c.applied).length : 0,
     tailLit: worldTraffic ? worldTraffic.cars.filter((c) => c.tailMat).length : 0,
