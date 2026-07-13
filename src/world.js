@@ -372,7 +372,8 @@ function collectApartments(b, out) {
 // grid cells gives each chunk a tight bounding sphere, so distant/off-screen
 // cells cull against the frustum + the clipped far plane. `place(a, i, M)` fills
 // the matrix for placement `a`; optional `color(a, i)` sets a per-instance tint.
-const CHUNK = 240; // metres per cell
+const CHUNK = 90; // metres per cell — must be smaller than the LOD detail radius,
+// or whole coarse cells flip to full detail and the LOD can't cull down avenues
 function addChunked(group, geometry, material, list, place, opts = {}) {
   if (!list.length) return;
   const cells = new Map();
@@ -402,7 +403,7 @@ function addChunked(group, geometry, material, list, place, opts = {}) {
 // mobile — down a straight avenue a 280 m radius renders hundreds of high-poly
 // buildings; 130 m keeps only the nearest block or two detailed.
 const LOD_MOBILE = (typeof navigator !== 'undefined') && (('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0);
-const LOD_NEAR2 = (LOD_MOBILE ? 130 : 320) ** 2;
+const LOD_NEAR2 = (LOD_MOBILE ? 150 : 340) ** 2;
 function addBuildingLOD(group, parts, list, cellsOut, opts = {}) {
   if (!list.length || !parts.length) return;
   const y = opts.y || 0;
