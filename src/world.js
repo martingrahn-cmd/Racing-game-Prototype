@@ -10,6 +10,36 @@ import {
 } from './textures.js';
 import { registerEmissive, registerOpacity, registerCustom } from './night.js';
 import { makeGLTFLoader } from './car.js';
+import { mergeGeometries } from '../vendor/utils/BufferGeometryUtils.js';
+
+// The apartment/house GLBs are flat-coloured (no textures, no emissive), so a
+// building that splits into 5-7 material parts is 5-7 InstancedMesh draw calls
+// per LOD cell. On the iPhone (draw-call bound) that was a top cost once cars
+// and people were merged. Bake each part's colour into vertex colours and merge
+// to ONE geometry + ONE shared material → one draw per building cell, same look
+// (#107). Bails (returns parts unchanged) if any part is textured or emissive.
+const BUILDING_VC_MAT = new THREE.MeshStandardMaterial({ roughness: 0.88, metalness: 0, vertexColors: true });
+function mergeFlatToVC(parts) {
+  if (parts.length < 2) return parts;
+  for (const p of parts) {
+    const m = p.material;
+    if (!m || m.map || m.emissiveMap || m.normalMap || !m.color || (m.emissive && (m.emissive.r + m.emissive.g + m.emissive.b) > 0)) return parts;
+  }
+  const geos = [];
+  for (const p of parts) {
+    const g = p.geometry.index ? p.geometry.toNonIndexed() : p.geometry.clone();
+    for (const name of Object.keys(g.attributes)) if (name !== 'position' && name !== 'normal') g.deleteAttribute(name);
+    if (!g.attributes.normal) g.computeVertexNormals();
+    const n = g.attributes.position.count, col = new Float32Array(n * 3), c = p.material.color;
+    for (let i = 0; i < n; i++) { col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    g.clearGroups();
+    geos.push(g);
+  }
+  const merged = mergeGeometries(geos, false);
+  if (!merged) return parts;
+  return [{ geometry: merged, material: BUILDING_VC_MAT }];
+}
 
 // Make a textured building glow from its windows at dusk/night. There's no window
 // mask on these low-poly models, so we reuse the colour map as an emissive map at
@@ -522,7 +552,7 @@ function buildApartments(group, spots, CURB_Y, lodCells) {
       const parts = [];
       gltf.scene.traverse((o) => { if (o.isMesh) { const g = o.geometry.clone(); g.applyMatrix4(o.matrixWorld); g.applyMatrix4(N); parts.push({ geometry: g, material: o.material }); } });
       for (const part of parts) litWindows(part.material);
-      addBuildingLOD(group, parts, list, lodCells, { y: CURB_Y, impostorColor: 0x8f8b84 });
+      addBuildingLOD(group, mergeFlatToVC(parts), list, lodCells, { y: CURB_Y, impostorColor: 0x8f8b84 });
     }, undefined, () => { /* keep the block empty if the model fails to load */ });
   });
 }
@@ -590,7 +620,9 @@ function buildVillas(group, spots, CURB_Y, lodCells) {
         litWindows(part.material);
       }
       const colorFn = mono ? (a) => new THREE.Color(VILLA_PALETTE[Math.abs(Math.round(a.x) * 3 + Math.round(a.z)) % VILLA_PALETTE.length]) : null;
-      addBuildingLOD(group, parts, list, lodCells, { y: CURB_Y, color: colorFn, impostorColor: mono ? 0xffffff : VILLA_WALL });
+      // house1 is flat-coloured multi-part → merge to one vertex-coloured draw;
+      // villa_c is mono (one textured material, per-instance colour) → unchanged
+      addBuildingLOD(group, mono ? parts : mergeFlatToVC(parts), list, lodCells, { y: CURB_Y, color: colorFn, impostorColor: mono ? 0xffffff : VILLA_WALL });
     }, undefined, () => { /* skip a villa model that fails to load */ });
   });
 }
