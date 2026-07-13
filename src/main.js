@@ -41,6 +41,7 @@ const canvas = document.getElementById('game');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.info.autoReset = false; // reset once per frame so counts cover all passes
 
 // Post pipeline does tonemapping/grading in HDR; fall back to direct
 // ACES rendering when unavailable (WebGL1).
@@ -66,6 +67,7 @@ canvas.addEventListener('webglcontextlost', (e) => {
 });
 
 const scene = new THREE.Scene();
+window.__scene = scene; // debug handle for scene inspection
 scene.fog = new THREE.Fog(0xdfe9f2, 260, 3100);
 
 const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.3, 5200);
@@ -621,6 +623,7 @@ let firstFrame = true;
 
 function loop(now) {
   requestAnimationFrame(loop);
+  renderer.info.reset(); // count draw calls / triangles across every pass this frame
   let dt = Math.min((now - last) / 1000, 0.1);
   last = now;
   perfTime += dt;
@@ -708,6 +711,7 @@ function loop(now) {
     post: postEnabled, d: +daynight.dayness.toFixed(3),
     sun: +sun.intensity.toFixed(2), hemi: +hemi.intensity.toFixed(2),
     tris: renderer.info.render.triangles,
+    calls: renderer.info.render.calls,
     cars: worldTraffic ? worldTraffic.cars.length : 0,
     carsUp: worldTraffic ? worldTraffic.cars.filter((c) => c.applied).length : 0,
     tailLit: worldTraffic ? worldTraffic.cars.filter((c) => c.tailMat).length : 0,

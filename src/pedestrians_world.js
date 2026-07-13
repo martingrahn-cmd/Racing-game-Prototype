@@ -78,7 +78,7 @@ function seatParts(parts, s) {
   for (const p of parts) { p.geometry.computeBoundingBox(); box.union(p.geometry.boundingBox); }
   const m = new THREE.Matrix4().makeScale(s, s, s)
     .multiply(new THREE.Matrix4().makeTranslation(-(box.min.x + box.max.x) / 2, -box.min.y, -(box.min.z + box.max.z) / 2));
-  for (const p of parts) p.geometry.applyMatrix4(m);
+  for (const p of parts) { p.geometry.applyMatrix4(m); p.geometry.computeBoundingSphere(); }
   return parts;
 }
 
@@ -92,7 +92,7 @@ function bakeFlipbook(gltf, clip, nFrames) {
   const s = 1.72 / (box.max.y - box.min.y || 1.72);
   const m = new THREE.Matrix4().makeScale(s, s, s)
     .multiply(new THREE.Matrix4().makeTranslation(-(box.min.x + box.max.x) / 2, -box.min.y, -(box.min.z + box.max.z) / 2));
-  for (const parts of frames) for (const p of parts) p.geometry.applyMatrix4(m);
+  for (const parts of frames) for (const p of parts) { p.geometry.applyMatrix4(m); p.geometry.computeBoundingSphere(); }
   return { frames, scale: s };
 }
 
@@ -128,7 +128,7 @@ function placePicnics(group, model, seated) {
       const ang = (s / n) * Math.PI * 2 + rnd() * 0.4;
       const parts = seated[Math.floor(rnd() * seated.length)];
       const person = new THREE.Group();
-      for (const part of parts) { const mm = new THREE.Mesh(part.geometry, part.material); mm.castShadow = true; mm.frustumCulled = false; person.add(mm); }
+      for (const part of parts) { const mm = new THREE.Mesh(part.geometry, part.material); mm.castShadow = true; person.add(mm); }
       const px = x + Math.cos(ang) * 0.85, pz = z + Math.sin(ang) * 0.85;
       person.position.set(px, CURB_Y + 0.02, pz);
       person.rotation.y = Math.atan2(x - px, z - pz); // face the blanket
@@ -270,7 +270,7 @@ export function createPedestrians(scene, model, signals, count = DAY_CROWD) {
         const container = new THREE.Group();
         const meshes = fb[0].map((part) => {
           const mesh = new THREE.Mesh(part.geometry, part.material);
-          mesh.castShadow = true; mesh.frustumCulled = false;
+          mesh.castShadow = true;   // frustum-culled (default): only on-screen peds draw
           container.add(mesh);
           return mesh;
         });
