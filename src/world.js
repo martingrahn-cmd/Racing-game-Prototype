@@ -398,7 +398,11 @@ function addChunked(group, geometry, material, list, place, opts = {}) {
 // one box InstancedMesh, register the pair, and updateBuildingLOD() swaps them
 // by camera distance each frame. `parts` are the baked {geometry,material} of
 // the model (base at y=0). Returns nothing; pushes {x,z,detail,box} into cells.
-const LOD_NEAR2 = 280 * 280; // within this radius → full detail, beyond → box impostor
+// Full detail within this radius, cheap box impostor beyond. Much tighter on
+// mobile — down a straight avenue a 280 m radius renders hundreds of high-poly
+// buildings; 130 m keeps only the nearest block or two detailed.
+const LOD_MOBILE = (typeof navigator !== 'undefined') && (('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0);
+const LOD_NEAR2 = (LOD_MOBILE ? 130 : 320) ** 2;
 function addBuildingLOD(group, parts, list, cellsOut, opts = {}) {
   if (!list.length || !parts.length) return;
   const y = opts.y || 0;
