@@ -27,6 +27,8 @@ import GUI from '../vendor/lil-gui.module.min.js';
 
 // ?world=1 → open-world free-roam slice (Phase 1). Default = the race circuit.
 const WORLD = new URLSearchParams(location.search).has('world');
+// touch device → treat as mobile: leaner draw distance, fewer agents, capped DPR
+const MOBILE = ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0;
 
 // true while the user is typing in a form field, so game hotkeys don't fire
 const uiTyping = () => {
@@ -111,7 +113,13 @@ if (WORLD) {
   });
   worldCollision = collision;
   drive = createDrive(null, 0, { world: { spawn: model.spawn, collision, curbY: model.CURB_Y, ramps: worldObj.ramps } });
-  scene.fog.near = 110; scene.fog.far = 560; // atmospheric fade at the district edge
+  // atmospheric fade at the district edge — and clip the far plane to just past
+  // the fog so all the fully-fogged (invisible) distant buildings down long
+  // avenues are culled instead of drawn. This is the big street-level win; even
+  // shorter on mobile.
+  if (MOBILE) { scene.fog.near = 85; scene.fog.far = 340; camera.far = 380; }
+  else { scene.fog.near = 110; scene.fog.far = 560; camera.far = 640; }
+  camera.updateProjectionMatrix();
 } else {
   ({ curve, length, cornerSpans } = buildTrack(scene));
   buildCity(scene, curve, length);
@@ -540,10 +548,10 @@ canvas.addEventListener('pointerdown', (e) => {
 
 // ------------------------------------------------------------ adaptive quality
 // Phones report a 2–3× devicePixelRatio; rendering the whole city at that is
-// brutal, so cap the ratio hard and start a couple of tiers down on touch
-// devices (the auto-scaler drops further if a frame budget is missed).
-const MOBILE = ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0;
-const PR_CAP = MOBILE ? 1.5 : Infinity;
+// brutal, so cap the ratio hard and start well down the ladder on touch devices
+// (post-processing off — it's the most fill-heavy pass; the auto-scaler drops
+// further if a frame budget is still missed).
+const PR_CAP = MOBILE ? 1.3 : Infinity;
 const TIERS = [
   { pr: 2.0, shadows: 2048, post: true },
   { pr: 1.5, shadows: 2048, post: true },
@@ -551,7 +559,7 @@ const TIERS = [
   { pr: 1.0, shadows: 1024, post: false },
   { pr: 1.0, shadows: 0, post: false },
 ];
-let tier = MOBILE ? 2 : 0;
+let tier = MOBILE ? 3 : 0;
 function applyTier() {
   const t = TIERS[tier];
   renderer.setPixelRatio(Math.min(devicePixelRatio, t.pr, PR_CAP));
