@@ -13,8 +13,41 @@
 // day: packed at midday, sparse at night. They also dodge the player's car.
 import * as THREE from 'three';
 import * as SkeletonUtils from '../vendor/utils/SkeletonUtils.js';
+import { mergeGeometries } from '../vendor/utils/BufferGeometryUtils.js';
 import { makeGLTFLoader } from './car.js';
 import { getDayness } from './night.js';
+
+// A baked character is ~10 flat-coloured material parts = ~10 draw calls, and a
+// crowd of them around the player was a top draw-call cost on the iPhone. Bake
+// each part's colour into vertex colours and merge every frame to ONE geometry
+// sharing ONE material → 1 draw per pedestrian, same look. Skips (keeps the
+// multi-part frames) if any material is textured, so nothing is silently lost.
+const PED_VC_MAT = new THREE.MeshStandardMaterial({ roughness: 1, metalness: 0, vertexColors: true });
+function bakeFlipbookVC(fb) {
+  for (const frame of fb) for (const p of frame) {
+    const m = p.material;
+    if (!m || m.map || m.normalMap || m.emissiveMap || !m.color) return fb; // textured → keep parts
+  }
+  const out = [];
+  for (const frame of fb) {
+    const geos = [];
+    for (const p of frame) {
+      const g = p.geometry.index ? p.geometry.toNonIndexed() : p.geometry.clone();
+      for (const name of Object.keys(g.attributes)) if (name !== 'position' && name !== 'normal') g.deleteAttribute(name);
+      if (!g.attributes.normal) g.computeVertexNormals();
+      const n = g.attributes.position.count, col = new Float32Array(n * 3), c = p.material.color;
+      for (let i = 0; i < n; i++) { col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
+      g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      g.clearGroups();
+      geos.push(g);
+    }
+    const merged = geos.length === 1 ? geos[0] : mergeGeometries(geos, false);
+    if (!merged) return fb;
+    merged.computeBoundingSphere();
+    out.push([{ geometry: merged, material: PED_VC_MAT }]);
+  }
+  return out;
+}
 
 const MODELS = [
   'assets/people/anne.glb', 'assets/people/casual.glb', 'assets/people/hoodie.glb',
@@ -261,6 +294,8 @@ export function createPedestrians(scene, model, signals, count = DAY_CROWD) {
       };
       for (const fb of flipbooks) for (const parts of fb) for (const part of parts) matte(part.material);
       for (const parts of seated) for (const part of parts) matte(part.material);
+      // collapse each walk flipbook to 1 draw/ped by baking colours to vertices
+      for (let i = 0; i < flipbooks.length; i++) flipbooks[i] = bakeFlipbookVC(flipbooks[i]);
 
       for (let k = 0; k < count; k++) {
         // pick a spawn node, then a character that fits that district
