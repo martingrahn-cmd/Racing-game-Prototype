@@ -696,7 +696,7 @@ function loop(now) {
   }
   fpsAcc += rawDt; fpsN++; fpsTimer += dt;
   if (fpsTimer > 0.5) {
-    elFps.textContent = `${Math.round(fpsN / fpsAcc)} FPS · cpu ${(msUpd + msRender).toFixed(0)}ms (u${msUpd.toFixed(0)}/r${msRender.toFixed(0)})`;
+    elFps.textContent = `${Math.round(fpsN / fpsAcc)}fps · t${tier}${postEnabled ? '+P' : ''} · ${renderer.info.render.calls}dc ${(renderer.info.render.triangles / 1e6).toFixed(1)}M · cpu ${(msUpd + msRender).toFixed(0)} (u${msUpd.toFixed(0)}/r${msRender.toFixed(0)})`;
     const cp = st ? st.pos : carGround;
     elCoords.textContent = `x ${cp.x.toFixed(0)} · z ${cp.z.toFixed(0)} · s ${Math.round(sPos)} m · ${daynight.params.timeOfDay.toFixed(2)}`;
     // the hint row follows the active input device
