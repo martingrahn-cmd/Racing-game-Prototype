@@ -234,7 +234,7 @@ export function createProps(scene, model) {
       // cells → each InstancedMesh gets a tight bounding sphere and frustum-culls
       // (one map-spanning InstancedMesh never culls — every tree drew every frame).
       if (!LOOSE.has(key)) {
-        const PROP_CHUNK = 140;
+        const PROP_CHUNK = 300; // coarse: we're draw-call bound with triangle headroom (#101)
         const cells = new Map();
         for (let i = 0; i < list.length; i++) {
           const ck = Math.floor(list[i].x / PROP_CHUNK) + ',' + Math.floor(list[i].z / PROP_CHUNK);
@@ -265,7 +265,7 @@ export function createProps(scene, model) {
       const r = key === 'bench' ? 1.5 : key === 'barrier' ? 1.3 : key === 'bicycle' ? 1.1
         : (key === 'hydrant' || key === 'cone') ? 0.7 : 0.95;
       const hit2 = (CAR_R + r) * (CAR_R + r);
-      const LOOSE_CHUNK = 140;
+      const LOOSE_CHUNK = 300; // coarse: draw-call bound, triangle headroom (#101)
       const cells = new Map();
       for (let i = 0; i < list.length; i++) {
         const ck = Math.floor(list[i].x / LOOSE_CHUNK) + ',' + Math.floor(list[i].z / LOOSE_CHUNK);

@@ -374,11 +374,19 @@ function collectApartments(b, out) {
 // the matrix for placement `a`; optional `color(a, i)` sets a per-instance tint.
 const CHUNK = 90; // metres per cell — must be smaller than the LOD detail radius,
 // or whole coarse cells flip to full detail and the LOD can't cull down avenues
+// Cheap static clutter (garden fences, driveways, hedges, garages, parked cars)
+// carries no LOD and next to no triangles, so it's chunked far COARSER: on the
+// iPhone we're draw-call bound with huge triangle headroom, and fine 90 m cells
+// spawned hundreds of tiny InstancedMeshes across the open residential edge
+// (~1170 draw calls). Bigger cells = far fewer draw calls; the extra triangles
+// pulled in at cell edges are free (#101).
+const CLUTTER_CHUNK = 300;
 function addChunked(group, geometry, material, list, place, opts = {}) {
   if (!list.length) return;
   const cells = new Map();
+  const cs = opts.chunk || CLUTTER_CHUNK;
   for (const a of list) {
-    const key = Math.floor(a.x / CHUNK) + ',' + Math.floor(a.z / CHUNK);
+    const key = Math.floor(a.x / cs) + ',' + Math.floor(a.z / cs);
     let arr = cells.get(key); if (!arr) { arr = []; cells.set(key, arr); }
     arr.push(a);
   }
@@ -701,7 +709,7 @@ function buildParkedCars(group, spots, CURB_Y) {
     // triangles every frame regardless of where the camera looked (#98).
     const cells = new Map();
     for (const s of spots) {
-      const key = Math.floor(s.x / CHUNK) + ',' + Math.floor(s.z / CHUNK);
+      const key = Math.floor(s.x / CLUTTER_CHUNK) + ',' + Math.floor(s.z / CLUTTER_CHUNK);
       let arr = cells.get(key); if (!arr) { arr = []; cells.set(key, arr); }
       arr.push(s);
     }
