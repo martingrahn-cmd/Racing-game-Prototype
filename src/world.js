@@ -364,6 +364,32 @@ function collectApartments(b, out) {
   }
 }
 
+// Build InstancedMeshes bucketed into spatial cells. One InstancedMesh spanning
+// the whole map never frustum-culls (its bounding sphere covers everything), so
+// on a big map every instance renders every frame. Splitting placements into
+// grid cells gives each chunk a tight bounding sphere, so distant/off-screen
+// cells cull against the frustum + the clipped far plane. `place(a, i, M)` fills
+// the matrix for placement `a`; optional `color(a, i)` sets a per-instance tint.
+const CHUNK = 240; // metres per cell
+function addChunked(group, geometry, material, list, place, opts = {}) {
+  if (!list.length) return;
+  const cells = new Map();
+  for (const a of list) {
+    const key = Math.floor(a.x / CHUNK) + ',' + Math.floor(a.z / CHUNK);
+    let arr = cells.get(key); if (!arr) { arr = []; cells.set(key, arr); }
+    arr.push(a);
+  }
+  const M = new THREE.Matrix4();
+  for (const arr of cells.values()) {
+    const im = new THREE.InstancedMesh(geometry, material, arr.length);
+    im.castShadow = opts.castShadow !== false; im.receiveShadow = !!opts.receiveShadow;
+    for (let i = 0; i < arr.length; i++) { place(arr[i], i, M); im.setMatrixAt(i, M); if (opts.color) im.setColorAt(i, opts.color(arr[i], i)); }
+    if (im.instanceColor) im.instanceColor.needsUpdate = true;
+    im.computeBoundingSphere();
+    group.add(im);
+  }
+}
+
 // Instance the apartment models at every placement. Each model is normalised by
 // DEPTH (its back-to-front size) so the street setback is the same whatever the
 // model, then grouped by material into InstancedMeshes. Windows glow at night.
@@ -383,13 +409,11 @@ function buildApartments(group, spots, CURB_Y) {
         .multiply(new THREE.Matrix4().makeTranslation(-(box.min.x + box.max.x) / 2, -box.min.y, -(box.min.z + box.max.z) / 2));
       const parts = [];
       gltf.scene.traverse((o) => { if (o.isMesh) { const g = o.geometry.clone(); g.applyMatrix4(o.matrixWorld); g.applyMatrix4(N); parts.push({ geometry: g, material: o.material }); } });
+      const q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
+      const place = (a, i, M) => { q.setFromAxisAngle(up, a.yaw); p.set(a.x, CURB_Y, a.z); M.compose(p, q, one); };
       for (const part of parts) {
         litWindows(part.material);
-        const im = new THREE.InstancedMesh(part.geometry, part.material, list.length);
-        im.castShadow = true; im.receiveShadow = true;
-        const M = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
-        for (let i = 0; i < list.length; i++) { q.setFromAxisAngle(up, list[i].yaw); p.set(list[i].x, CURB_Y, list[i].z); M.compose(p, q, one); im.setMatrixAt(i, M); }
-        group.add(im);
+        addChunked(group, part.geometry, part.material, list, place, { receiveShadow: true });
       }
     }, undefined, () => { /* keep the block empty if the model fails to load */ });
   });
@@ -449,6 +473,8 @@ function buildVillas(group, spots, CURB_Y) {
       const parts = [];
       gltf.scene.traverse((o) => { if (o.isMesh) { const g = o.geometry.clone(); g.applyMatrix4(o.matrixWorld); g.applyMatrix4(N); parts.push({ geometry: g, material: o.material }); } });
       const mono = parts.length === 1;   // villa_c: one white material → per-instance colour
+      const vq = new THREE.Quaternion(), vup = new THREE.Vector3(0, 1, 0), vone = new THREE.Vector3(1, 1, 1), vp = new THREE.Vector3();
+      const placeVilla = (a, i, M) => { vq.setFromAxisAngle(vup, a.yaw); vp.set(a.x, CURB_Y, a.z); M.compose(vp, vq, vone); };
       for (const part of parts) {
         const m = part.material, nm = (m.name || '').toLowerCase();
         if (!mono) {
@@ -456,15 +482,8 @@ function buildVillas(group, spots, CURB_Y) {
           else if (nm.includes('roof')) m.color.setHex(0x5f5148); // tone down the teal roof
         } else { m.color.setHex(0xffffff); m.vertexColors = false; } // white base so instanceColor is exact
         litWindows(part.material);
-        const im = new THREE.InstancedMesh(part.geometry, part.material, list.length);
-        im.castShadow = true; im.receiveShadow = true;
-        const M = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
-        for (let i = 0; i < list.length; i++) {
-          q.setFromAxisAngle(up, list[i].yaw); p.set(list[i].x, CURB_Y, list[i].z); M.compose(p, q, one); im.setMatrixAt(i, M);
-          if (mono) im.setColorAt(i, new THREE.Color(VILLA_PALETTE[(Math.round(list[i].x) * 3 + i) % VILLA_PALETTE.length]));
-        }
-        if (im.instanceColor) im.instanceColor.needsUpdate = true;
-        group.add(im);
+        const colorFn = mono ? (a) => new THREE.Color(VILLA_PALETTE[Math.abs(Math.round(a.x) * 3 + Math.round(a.z)) % VILLA_PALETTE.length]) : null;
+        addChunked(group, part.geometry, part.material, list, placeVilla, { receiveShadow: true, color: colorFn });
       }
     }, undefined, () => { /* skip a villa model that fails to load */ });
   });
@@ -519,35 +538,20 @@ function buildVillaGardens(group, spots, CURB_Y, mats) {
     const r = rnd(); const nCars = r < 0.32 ? 0 : r < 0.72 ? 1 : 2;
     for (let c = 0; c < nCars; c++) parkedSpots.push({ x: grx + ox * (2.6 + c * 3.0), z: grz + oz * (2.6 + c * 3.0), yaw: gyaw });
   }
-  // --- draw each collected kind as one InstancedMesh ---
-  const instScaled = (items, mat, hy, y, cast) => {
-    if (!items.length) return;
-    const im = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), mat, items.length);
-    im.castShadow = cast; im.receiveShadow = !cast;
-    const M = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), sc = new THREE.Vector3();
-    for (let i = 0; i < items.length; i++) { p.set(items[i].x, y, items[i].z); sc.set(items[i].sx, hy, items[i].sz); M.compose(p, q, sc); im.setMatrixAt(i, M); }
-    group.add(im);
-  };
-  instScaled(fences, fenceMat, FH, CURB_Y + FH / 2, true);
-  instScaled(drives, driveMat, 0.06, CURB_Y + 0.05, false);
-  if (hedges.length) {
-    const im = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), hedgeMat, hedges.length);
-    im.castShadow = true; im.receiveShadow = true;
-    const M = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), sc = new THREE.Vector3(1.1, 0.8, 1.1);
-    for (let i = 0; i < hedges.length; i++) { p.set(hedges[i].x, CURB_Y + 0.4, hedges[i].z); M.compose(p, q, sc); im.setMatrixAt(i, M); }
-    group.add(im);
-  }
-  if (garages.length) {
-    const bodyGeo = new THREE.BoxGeometry(4.4, 2.7, 4.4); bodyGeo.translate(0, 1.35, 0);
-    const doorGeo = new THREE.BoxGeometry(3.0, 2.0, 0.12); doorGeo.translate(0, 1.0, 2.26);
-    const roofGeo = new THREE.ConeGeometry(3.5, 1.3, 4); roofGeo.rotateY(Math.PI / 4); roofGeo.translate(0, 3.35, 0);
-    for (const [geo, mat, cast] of [[bodyGeo, garageWall, true], [doorGeo, garageDoor, false], [roofGeo, garageRoof, true]]) {
-      const im = new THREE.InstancedMesh(geo, mat, garages.length); im.castShadow = cast;
-      const M = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
-      for (let i = 0; i < garages.length; i++) { q.setFromAxisAngle(up, garages[i].yaw); p.set(garages[i].x, CURB_Y, garages[i].z); M.compose(p, q, one); im.setMatrixAt(i, M); }
-      group.add(im);
-    }
-  }
+  // --- draw each collected kind as spatially-chunked InstancedMeshes ---
+  const box = new THREE.BoxGeometry(1, 1, 1);
+  const q0 = new THREE.Quaternion(), p0 = new THREE.Vector3(), sc = new THREE.Vector3();
+  addChunked(group, box, fenceMat, fences, (a, i, M) => { p0.set(a.x, CURB_Y + FH / 2, a.z); sc.set(a.sx, FH, a.sz); M.compose(p0, q0, sc); });
+  addChunked(group, box, driveMat, drives, (a, i, M) => { p0.set(a.x, CURB_Y + 0.05, a.z); sc.set(a.sx, 0.06, a.sz); M.compose(p0, q0, sc); }, { castShadow: false, receiveShadow: true });
+  addChunked(group, box, hedgeMat, hedges, (a, i, M) => { p0.set(a.x, CURB_Y + 0.4, a.z); sc.set(1.1, 0.8, 1.1); M.compose(p0, q0, sc); });
+  const bodyGeo = new THREE.BoxGeometry(4.4, 2.7, 4.4); bodyGeo.translate(0, 1.35, 0);
+  const doorGeo = new THREE.BoxGeometry(3.0, 2.0, 0.12); doorGeo.translate(0, 1.0, 2.26);
+  const roofGeo = new THREE.ConeGeometry(3.5, 1.3, 4); roofGeo.rotateY(Math.PI / 4); roofGeo.translate(0, 3.35, 0);
+  const gup = new THREE.Vector3(0, 1, 0), gone = new THREE.Vector3(1, 1, 1);
+  const placeGar = (a, i, M) => { q0.setFromAxisAngle(gup, a.yaw); p0.set(a.x, CURB_Y, a.z); M.compose(p0, q0, gone); };
+  addChunked(group, bodyGeo, garageWall, garages, placeGar);
+  addChunked(group, doorGeo, garageDoor, garages, placeGar, { castShadow: false });
+  addChunked(group, roofGeo, garageRoof, garages, placeGar);
   return parkedSpots;
 }
 
