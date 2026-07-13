@@ -584,11 +584,21 @@ function applyTier() {
 }
 applyTier();
 
-let slowFrames = 0;
+// The quality ladder steps BOTH ways: drop a tier when frames are consistently
+// slow, and — crucially — climb back up when they're consistently smooth, so a
+// single slow patch (e.g. driving to the city edge) doesn't strand the player
+// on the ugliest tier forever. Asymmetric thresholds give wide hysteresis so it
+// settles instead of oscillating: ~1.5 s of <42 fps to drop, ~5 s of >57 fps to
+// climb, and each switch resets both counters.
+const TIER_CEIL = MOBILE ? 1 : 0;   // don't push mobile past tier 1 (PR is capped anyway)
+let slowFrames = 0, fastFrames = 0;
 function autoQuality(dt) {
-  if (dt > 1 / 42) slowFrames++; else slowFrames = Math.max(0, slowFrames - 2);
+  if (dt > 1 / 42) { slowFrames++; fastFrames = 0; }
+  else { slowFrames = Math.max(0, slowFrames - 2); if (dt < 1 / 57) fastFrames++; else fastFrames = Math.max(0, fastFrames - 1); }
   if (slowFrames > 90 && tier < TIERS.length - 1) {
-    tier++; slowFrames = 0; applyTier();
+    tier++; slowFrames = 0; fastFrames = 0; applyTier();
+  } else if (fastFrames > 300 && tier > TIER_CEIL) {
+    tier--; slowFrames = 0; fastFrames = 0; applyTier();
   }
 }
 
