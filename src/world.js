@@ -441,14 +441,17 @@ function addBuildingLOD(group, parts, list, cellsOut, opts = {}) {
   }
 }
 function updateBuildingLOD(cells, camPos) {
-  if (!cells || !camPos) return;
+  if (!cells || !camPos) return { near: 0, total: 0 };
+  let near = 0;
   for (const c of cells) {
-    const near = ((c.x - camPos.x) ** 2 + (c.z - camPos.z) ** 2) < LOD_NEAR2;
-    if (c.box.visible === near) {           // state changed → swap detail <-> impostor
-      c.box.visible = !near;
-      for (const im of c.detail) im.visible = near;
+    const isNear = ((c.x - camPos.x) ** 2 + (c.z - camPos.z) ** 2) < LOD_NEAR2;
+    if (isNear) near++;
+    if (c.box.visible === isNear) {         // state changed → swap detail <-> impostor
+      c.box.visible = !isNear;
+      for (const im of c.detail) im.visible = isNear;
     }
   }
+  return { near, total: cells.length };
 }
 
 // Instance the apartment models at every placement. Each model is normalised by
