@@ -190,7 +190,8 @@ export function buildWorld(scene, model) {
   });
 
   const plazaR = model.plaza ? buildPlaza(group, model.plaza, CURB_Y) : null;
-  buildApartments(group, aptSpots, CURB_Y);
+  const lodCells = [];
+  buildApartments(group, aptSpots, CURB_Y, lodCells);
   const hedgeMat = new THREE.MeshStandardMaterial({ color: 0x3f7a3a, roughness: 0.95, metalness: 0 });
   const hedgeGeo = new THREE.BoxGeometry(1, 1, 1);
   const fenceMat = new THREE.MeshStandardMaterial({ color: 0xb7a684, roughness: 0.85, metalness: 0 });
@@ -205,7 +206,7 @@ export function buildWorld(scene, model) {
   // (#79: individual plots, not one fence around the whole block)
   const parkedSpots = buildVillaGardens(group, villaSpots, CURB_Y,
     { fenceMat, garageWall, garageDoor, garageRoof, hedgeMat, hedgeGeo });
-  buildVillas(group, villaSpots, CURB_Y);
+  buildVillas(group, villaSpots, CURB_Y, lodCells);
   buildParkedCars(group, parkedSpots, CURB_Y);
   buildStreetLamps(group, model);
 
@@ -231,6 +232,7 @@ export function buildWorld(scene, model) {
     group, colliders: { buildings: buildingAABBs }, obstacles, ramps,
     updateDoors: (dt, playerPos) => updateDoors(doors, dt, playerPos),
     updateClock: (timeOfDay) => updateClock(plazaR && plazaR.clockHands, timeOfDay),
+    updateLOD: (camPos) => updateBuildingLOD(lodCells, camPos),
   };
 }
 
@@ -390,11 +392,65 @@ function addChunked(group, geometry, material, list, place, opts = {}) {
   }
 }
 
+// Building LOD: near cells draw the detailed model, far cells draw a single
+// cheap box impostor per building (a low-poly GLB at ~5000 tris × thousands of
+// instances is what pins the GPU). Per cell we build both the detail meshes and
+// one box InstancedMesh, register the pair, and updateBuildingLOD() swaps them
+// by camera distance each frame. `parts` are the baked {geometry,material} of
+// the model (base at y=0). Returns nothing; pushes {x,z,detail,box} into cells.
+const LOD_NEAR2 = 280 * 280; // within this radius → full detail, beyond → box impostor
+function addBuildingLOD(group, parts, list, cellsOut, opts = {}) {
+  if (!list.length || !parts.length) return;
+  const y = opts.y || 0;
+  // one box sized to the model's overall footprint + height
+  const bb = new THREE.Box3();
+  for (const part of parts) { part.geometry.computeBoundingBox(); bb.union(part.geometry.boundingBox); }
+  const size = bb.getSize(new THREE.Vector3());
+  const boxGeo = new THREE.BoxGeometry(Math.max(size.x, 1), Math.max(size.y, 1), Math.max(size.z, 1));
+  boxGeo.translate((bb.min.x + bb.max.x) / 2, bb.min.y + size.y / 2, (bb.min.z + bb.max.z) / 2);
+  const boxMat = new THREE.MeshStandardMaterial({ color: opts.impostorColor || 0x8a8886, roughness: 0.92, metalness: 0 });
+  const cells = new Map();
+  for (const a of list) {
+    const key = Math.floor(a.x / CHUNK) + ',' + Math.floor(a.z / CHUNK);
+    let arr = cells.get(key); if (!arr) { arr = []; cells.set(key, arr); }
+    arr.push(a);
+  }
+  const q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3(), M = new THREE.Matrix4();
+  const fill = (im) => {
+    for (let i = 0; i < im.count; i++) { const a = im.userData.arr[i]; q.setFromAxisAngle(up, a.yaw); p.set(a.x, y, a.z); M.compose(p, q, one); im.setMatrixAt(i, M); if (opts.color) im.setColorAt(i, opts.color(a, i)); }
+    if (im.instanceColor) im.instanceColor.needsUpdate = true;
+    im.computeBoundingSphere();
+  };
+  for (const arr of cells.values()) {
+    let sx = 0, sz = 0; for (const a of arr) { sx += a.x; sz += a.z; } sx /= arr.length; sz /= arr.length;
+    const detail = [];
+    for (const part of parts) {
+      const im = new THREE.InstancedMesh(part.geometry, part.material, arr.length);
+      im.castShadow = true; im.receiveShadow = true; im.userData.arr = arr; fill(im);
+      group.add(im); detail.push(im);
+    }
+    const boxIm = new THREE.InstancedMesh(boxGeo, boxMat, arr.length);
+    boxIm.castShadow = true; boxIm.userData.arr = arr; fill(boxIm); boxIm.visible = false;
+    group.add(boxIm);
+    cellsOut.push({ x: sx, z: sz, detail, box: boxIm });
+  }
+}
+function updateBuildingLOD(cells, camPos) {
+  if (!cells || !camPos) return;
+  for (const c of cells) {
+    const near = ((c.x - camPos.x) ** 2 + (c.z - camPos.z) ** 2) < LOD_NEAR2;
+    if (c.box.visible === near) {           // state changed → swap detail <-> impostor
+      c.box.visible = !near;
+      for (const im of c.detail) im.visible = near;
+    }
+  }
+}
+
 // Instance the apartment models at every placement. Each model is normalised by
 // DEPTH (its back-to-front size) so the street setback is the same whatever the
 // model, then grouped by material into InstancedMeshes. Windows glow at night.
 const APT_MODELS = ['assets/poly/apt_b.glb', 'assets/poly/apt_a.glb'];
-function buildApartments(group, spots, CURB_Y) {
+function buildApartments(group, spots, CURB_Y, lodCells) {
   if (!spots.length) return;
   const loader = makeGLTFLoader();
   APT_MODELS.forEach((path, mi) => {
@@ -409,12 +465,8 @@ function buildApartments(group, spots, CURB_Y) {
         .multiply(new THREE.Matrix4().makeTranslation(-(box.min.x + box.max.x) / 2, -box.min.y, -(box.min.z + box.max.z) / 2));
       const parts = [];
       gltf.scene.traverse((o) => { if (o.isMesh) { const g = o.geometry.clone(); g.applyMatrix4(o.matrixWorld); g.applyMatrix4(N); parts.push({ geometry: g, material: o.material }); } });
-      const q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
-      const place = (a, i, M) => { q.setFromAxisAngle(up, a.yaw); p.set(a.x, CURB_Y, a.z); M.compose(p, q, one); };
-      for (const part of parts) {
-        litWindows(part.material);
-        addChunked(group, part.geometry, part.material, list, place, { receiveShadow: true });
-      }
+      for (const part of parts) litWindows(part.material);
+      addBuildingLOD(group, parts, list, lodCells, { y: CURB_Y, impostorColor: 0x8f8b84 });
     }, undefined, () => { /* keep the block empty if the model fails to load */ });
   });
 }
@@ -457,7 +509,7 @@ function collectVillas(b, out) {
   }
 }
 
-function buildVillas(group, spots, CURB_Y) {
+function buildVillas(group, spots, CURB_Y, lodCells) {
   if (!spots.length) return;
   const loader = makeGLTFLoader();
   VILLA_MODELS.forEach((path, mi) => {
@@ -473,8 +525,6 @@ function buildVillas(group, spots, CURB_Y) {
       const parts = [];
       gltf.scene.traverse((o) => { if (o.isMesh) { const g = o.geometry.clone(); g.applyMatrix4(o.matrixWorld); g.applyMatrix4(N); parts.push({ geometry: g, material: o.material }); } });
       const mono = parts.length === 1;   // villa_c: one white material → per-instance colour
-      const vq = new THREE.Quaternion(), vup = new THREE.Vector3(0, 1, 0), vone = new THREE.Vector3(1, 1, 1), vp = new THREE.Vector3();
-      const placeVilla = (a, i, M) => { vq.setFromAxisAngle(vup, a.yaw); vp.set(a.x, CURB_Y, a.z); M.compose(vp, vq, vone); };
       for (const part of parts) {
         const m = part.material, nm = (m.name || '').toLowerCase();
         if (!mono) {
@@ -482,9 +532,9 @@ function buildVillas(group, spots, CURB_Y) {
           else if (nm.includes('roof')) m.color.setHex(0x5f5148); // tone down the teal roof
         } else { m.color.setHex(0xffffff); m.vertexColors = false; } // white base so instanceColor is exact
         litWindows(part.material);
-        const colorFn = mono ? (a) => new THREE.Color(VILLA_PALETTE[Math.abs(Math.round(a.x) * 3 + Math.round(a.z)) % VILLA_PALETTE.length]) : null;
-        addChunked(group, part.geometry, part.material, list, placeVilla, { receiveShadow: true, color: colorFn });
       }
+      const colorFn = mono ? (a) => new THREE.Color(VILLA_PALETTE[Math.abs(Math.round(a.x) * 3 + Math.round(a.z)) % VILLA_PALETTE.length]) : null;
+      addBuildingLOD(group, parts, list, lodCells, { y: CURB_Y, color: colorFn, impostorColor: mono ? 0xffffff : VILLA_WALL });
     }, undefined, () => { /* skip a villa model that fails to load */ });
   });
 }
