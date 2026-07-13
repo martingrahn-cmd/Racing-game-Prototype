@@ -45,6 +45,42 @@ export function createDrive(curve, length, opts = {}) {
   let camHeld = false;
   let resetHeld = false;
 
+  // ---------------- on-screen touch controls (phones/tablets) ----------------
+  const touch = { steer: 0, throttle: 0, brake: 0, hand: false, boost: false, horn: false, reset: false };
+  (function setupTouch() {
+    const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0;
+    if (!isTouch) return;
+    document.body.classList.add('touch');
+    const hold = (id, set) => {
+      const el = document.getElementById(id); if (!el) return;
+      const on = (e) => { e.preventDefault(); set(true); el.classList.add('pressed'); };
+      const off = (e) => { e.preventDefault(); set(false); el.classList.remove('pressed'); };
+      el.addEventListener('pointerdown', on);
+      for (const ev of ['pointerup', 'pointercancel', 'pointerleave', 'lostpointercapture']) el.addEventListener(ev, off);
+    };
+    hold('btnGas', (v) => { touch.throttle = v ? 1 : 0; });
+    hold('btnBrake', (v) => { touch.brake = v ? 1 : 0; });
+    hold('btnHand', (v) => { touch.hand = v; });
+    hold('btnBoost', (v) => { touch.boost = v; });
+    hold('btnHorn', (v) => { touch.horn = v; });
+    hold('btnReset', (v) => { touch.reset = v; });
+    // analog steering pad: drag left/right, self-centres on release
+    const pad = document.getElementById('steerPad'), knob = document.getElementById('steerKnob');
+    if (pad) {
+      let active = null;
+      const setX = (clientX) => {
+        const r = pad.getBoundingClientRect();
+        const t = Math.max(-1, Math.min(1, (clientX - (r.left + r.width / 2)) / (r.width / 2 - 8)));
+        touch.steer = t;
+        if (knob) knob.style.transform = `translateX(${t * (r.width / 2 - 34)}px)`;
+      };
+      pad.addEventListener('pointerdown', (e) => { e.preventDefault(); active = e.pointerId; try { pad.setPointerCapture(e.pointerId); } catch { /* ignore */ } setX(e.clientX); pad.classList.add('pressed'); });
+      pad.addEventListener('pointermove', (e) => { if (active === e.pointerId) { e.preventDefault(); setX(e.clientX); } });
+      const end = (e) => { if (active === e.pointerId) { active = null; touch.steer = 0; if (knob) knob.style.transform = 'translateX(0)'; pad.classList.remove('pressed'); } };
+      for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) pad.addEventListener(ev, end);
+    }
+  })();
+
   function readInput() {
     let steer = 0, throttle = 0, brake = 0, hand = false, look = false, horn = false, reset = false, boost = false;
     if (keys.has('ArrowLeft') || keys.has('KeyA')) steer -= 1;
@@ -75,6 +111,15 @@ export function createDrive(curve, length, opts = {}) {
       if (pad.buttons[14]?.pressed) steer -= 1;
       if (pad.buttons[15]?.pressed) steer += 1;
     }
+    // on-screen touch controls fold into the same inputs
+    throttle = Math.max(throttle, touch.throttle);
+    brake = Math.max(brake, touch.brake);
+    steer += touch.steer;
+    hand = hand || touch.hand;
+    boost = boost || touch.boost;
+    horn = horn || touch.horn;
+    resetNow = resetNow || touch.reset;
+
     reset = resetNow && !resetHeld; // edge-trigger
     resetHeld = resetNow;
     return { steer: THREE.MathUtils.clamp(steer, -1, 1), throttle, brake, hand, look, horn, reset, boost };

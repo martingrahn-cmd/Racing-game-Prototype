@@ -4,6 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Apex City">
+<meta name="theme-color" content="#0b0d10">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
 <title>APEX CITY — Racing Prototype</title>
 <style>
   :root { color-scheme: dark; }
@@ -132,6 +138,67 @@
   }
   #loader.done { opacity: 0; pointer-events: none; }
   #loader span { color: #ffd94a; }
+
+  /* ---------- on-screen touch controls (shown only on touch devices) ---------- */
+  #touch { position: fixed; inset: 0; z-index: 16; pointer-events: none; display: none; }
+  body.touch #touch { display: block; }
+  #touch button, #steerPad { pointer-events: auto; touch-action: none;
+    -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent;
+    color: #fff; font-weight: 800; letter-spacing: 0.08em; font-family: system-ui, sans-serif; }
+  #steerPad {
+    position: absolute; left: 16px; bottom: calc(16px + env(safe-area-inset-bottom));
+    width: min(46vw, 320px); height: 94px; border-radius: 20px;
+    background: rgba(16,20,28,0.42); border: 1px solid rgba(255,255,255,0.22);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    display: flex; align-items: center; justify-content: center; overflow: hidden;
+  }
+  #steerPad.pressed { background: rgba(255,217,74,0.14); }
+  #steerKnob {
+    position: absolute; width: 54px; height: 74px; border-radius: 15px;
+    background: rgba(255,255,255,0.22); border: 1px solid rgba(255,255,255,0.42);
+    will-change: transform;
+  }
+  #steerPad .tlabel { font-size: 12px; opacity: 0.45; }
+  #btnReset {
+    position: absolute; left: 16px; bottom: calc(122px + env(safe-area-inset-bottom));
+    width: 50px; height: 50px; border-radius: 50%; font-size: 20px;
+    background: rgba(16,20,28,0.5); border: 1px solid rgba(255,255,255,0.28);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  }
+  #pedals {
+    position: absolute; right: 14px; bottom: calc(14px + env(safe-area-inset-bottom));
+    display: flex; flex-direction: column; align-items: flex-end; gap: 10px;
+  }
+  #pedRow1 { display: flex; gap: 10px; }
+  #pedRow2 { display: flex; gap: 12px; align-items: flex-end; }
+  .tbtn {
+    border: 1px solid rgba(255,255,255,0.28); background: rgba(16,20,28,0.5);
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  }
+  .tbtn.gas { width: 106px; height: 106px; font-size: 18px; background: rgba(53,208,127,0.26); border-color: rgba(53,208,127,0.6); }
+  .tbtn.brake { width: 88px; height: 88px; font-size: 14px; background: rgba(255,90,60,0.24); border-color: rgba(255,90,60,0.55); }
+  .tbtn.small { width: 58px; height: 58px; font-size: 11px; }
+  .tbtn.pressed { filter: brightness(1.65); }
+
+  /* landscape phone HUD tweaks so the driving controls have room */
+  body.touch #hint, body.touch #camName, body.touch #coords { display: none; }
+  body.touch #minimap { left: 12px; top: 54px; bottom: auto; width: 108px; height: 108px; }
+  body.touch #speedBox { right: auto; left: 50%; transform: translateX(-50%);
+    bottom: auto; top: max(8px, env(safe-area-inset-top)); text-align: center; }
+  body.touch #speed { font-size: 34px; }
+  body.touch #speedBox .unit { font-size: 11px; }
+  body.touch #controls { top: max(8px, env(safe-area-inset-top)); right: 12px;
+    bottom: auto; transform: none; flex-direction: row; }
+  body.touch #btnPlus, body.touch #btnMinus { display: none; }
+  body.touch #fps { top: 62px; right: 14px; }
+
+  /* rotate-to-landscape nudge */
+  #rotate { position: fixed; inset: 0; z-index: 30; display: none;
+    align-items: center; justify-content: center; text-align: center;
+    background: #0b0d10; color: #fff; font-size: 20px; font-weight: 800; padding: 8vw; }
+  #rotate b { color: #ffd94a; }
+  @media (orientation: portrait) { body.touch #rotate { display: flex; } }
 </style>
 </head>
 <body>
@@ -174,6 +241,23 @@
     </div>
   </div>
 </div>
+
+<div id="touch" aria-hidden="true">
+  <div id="steerPad"><div id="steerKnob"></div><span class="tlabel">◄ STYR ►</span></div>
+  <button id="btnReset" title="Reset">↺</button>
+  <div id="pedals">
+    <div id="pedRow1">
+      <button id="btnHand" class="tbtn small">P</button>
+      <button id="btnBoost" class="tbtn small">N₂O</button>
+      <button id="btnHorn" class="tbtn small">TUT</button>
+    </div>
+    <div id="pedRow2">
+      <button id="btnBrake" class="tbtn brake">BROMS</button>
+      <button id="btnGas" class="tbtn gas">GAS</button>
+    </div>
+  </div>
+</div>
+<div id="rotate">Vrid telefonen till<br><b>liggande läge</b> 🔁</div>
 
 <div id="loader">GENERERAR <span>&nbsp;STAD…</span></div>
 

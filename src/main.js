@@ -539,6 +539,11 @@ canvas.addEventListener('pointerdown', (e) => {
 });
 
 // ------------------------------------------------------------ adaptive quality
+// Phones report a 2–3× devicePixelRatio; rendering the whole city at that is
+// brutal, so cap the ratio hard and start a couple of tiers down on touch
+// devices (the auto-scaler drops further if a frame budget is missed).
+const MOBILE = ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0;
+const PR_CAP = MOBILE ? 1.5 : Infinity;
 const TIERS = [
   { pr: 2.0, shadows: 2048, post: true },
   { pr: 1.5, shadows: 2048, post: true },
@@ -546,10 +551,10 @@ const TIERS = [
   { pr: 1.0, shadows: 1024, post: false },
   { pr: 1.0, shadows: 0, post: false },
 ];
-let tier = 0;
+let tier = MOBILE ? 2 : 0;
 function applyTier() {
   const t = TIERS[tier];
-  renderer.setPixelRatio(Math.min(devicePixelRatio, t.pr));
+  renderer.setPixelRatio(Math.min(devicePixelRatio, t.pr, PR_CAP));
   const wantPost = t.post && !!post;
   if (wantPost !== postEnabled) {
     postEnabled = wantPost;
