@@ -414,15 +414,44 @@ function addBuildingLOD(group, parts, list, cellsOut, opts = {}) {
   const boxGeo = new THREE.BoxGeometry(Math.max(size.x, 1), Math.max(size.y, 1), Math.max(size.z, 1));
   boxGeo.translate((bb.min.x + bb.max.x) / 2, bb.min.y + size.y / 2, (bb.min.z + bb.max.z) / 2);
   const boxMat = new THREE.MeshStandardMaterial({ color: opts.impostorColor || 0x8a8886, roughness: 0.92, metalness: 0 });
+  const q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3(), M = new THREE.Matrix4();
+
+  // Box impostors are 12-triangle throwaways, so what actually costs us on the
+  // GPU is one draw call per far cell (~800 of them at a 4x map — brutal on the
+  // iPhone's tiled renderer). Bucket the boxes into COARSE cells (one merged
+  // InstancedMesh per ~360 m region → a few dozen draw calls instead of ~800)
+  // while keeping the DETAIL cells fine (90 m) so triangle culling stays tight.
+  // A building's box is hidden when its fine cell is near by zeroing that one
+  // instance's matrix in the coarse mesh (#99).
+  const BOX_CHUNK = CHUNK * 4;
+  const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
+  const coarse = new Map();
+  for (const a of list) {
+    const key = Math.floor(a.x / BOX_CHUNK) + ',' + Math.floor(a.z / BOX_CHUNK);
+    let arr = coarse.get(key); if (!arr) { arr = []; coarse.set(key, arr); }
+    a._bi = arr.length; a._boxArr = arr; arr.push(a);
+  }
+  for (const arr of coarse.values()) {
+    const boxIm = new THREE.InstancedMesh(boxGeo, boxMat, arr.length);
+    boxIm.castShadow = true; boxIm.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    for (let i = 0; i < arr.length; i++) {
+      const a = arr[i]; q.setFromAxisAngle(up, a.yaw); p.set(a.x, y, a.z); M.compose(p, q, one);
+      a._boxMat = M.clone(); boxIm.setMatrixAt(i, M);
+    }
+    boxIm.computeBoundingSphere();
+    group.add(boxIm);
+    for (const a of arr) a._boxIm = boxIm;
+  }
+
+  // fine detail cells (90 m) — the high-poly models, culled tightly + LOD-swapped
   const cells = new Map();
   for (const a of list) {
     const key = Math.floor(a.x / CHUNK) + ',' + Math.floor(a.z / CHUNK);
     let arr = cells.get(key); if (!arr) { arr = []; cells.set(key, arr); }
     arr.push(a);
   }
-  const q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3(), M = new THREE.Matrix4();
-  const fill = (im) => {
-    for (let i = 0; i < im.count; i++) { const a = im.userData.arr[i]; q.setFromAxisAngle(up, a.yaw); p.set(a.x, y, a.z); M.compose(p, q, one); im.setMatrixAt(i, M); if (opts.color) im.setColorAt(i, opts.color(a, i)); }
+  const fill = (im, arr) => {
+    for (let i = 0; i < arr.length; i++) { const a = arr[i]; q.setFromAxisAngle(up, a.yaw); p.set(a.x, y, a.z); M.compose(p, q, one); im.setMatrixAt(i, M); if (opts.color) im.setColorAt(i, opts.color(a, i)); }
     if (im.instanceColor) im.instanceColor.needsUpdate = true;
     im.computeBoundingSphere();
   };
@@ -431,26 +460,28 @@ function addBuildingLOD(group, parts, list, cellsOut, opts = {}) {
     const detail = [];
     for (const part of parts) {
       const im = new THREE.InstancedMesh(part.geometry, part.material, arr.length);
-      im.castShadow = true; im.receiveShadow = true; im.userData.arr = arr; fill(im);
+      im.castShadow = true; im.receiveShadow = true; im.visible = false; fill(im, arr);
       group.add(im); detail.push(im);
     }
-    const boxIm = new THREE.InstancedMesh(boxGeo, boxMat, arr.length);
-    boxIm.castShadow = true; boxIm.userData.arr = arr; fill(boxIm); boxIm.visible = false;
-    group.add(boxIm);
-    cellsOut.push({ x: sx, z: sz, detail, box: boxIm });
+    // the box instances (in their coarse meshes) this cell must hide when near
+    const boxes = arr.map((a) => ({ im: a._boxIm, i: a._bi, mat: a._boxMat }));
+    cellsOut.push({ x: sx, z: sz, detail, boxes, near: false, ZERO });
   }
 }
 function updateBuildingLOD(cells, camPos) {
   if (!cells || !camPos) return { near: 0, total: 0 };
   let near = 0;
+  const dirty = new Set();
   for (const c of cells) {
     const isNear = ((c.x - camPos.x) ** 2 + (c.z - camPos.z) ** 2) < LOD_NEAR2;
     if (isNear) near++;
-    if (c.box.visible === isNear) {         // state changed → swap detail <-> impostor
-      c.box.visible = !isNear;
+    if (c.near !== isNear) {                 // state changed → swap detail <-> impostor
+      c.near = isNear;
       for (const im of c.detail) im.visible = isNear;
+      for (const b of c.boxes) { b.im.setMatrixAt(b.i, isNear ? c.ZERO : b.mat); dirty.add(b.im); }
     }
   }
+  for (const im of dirty) im.instanceMatrix.needsUpdate = true;
   return { near, total: cells.length };
 }
 
