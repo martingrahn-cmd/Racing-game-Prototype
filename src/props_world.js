@@ -229,6 +229,34 @@ export function createProps(scene, model) {
     const cols = TINT[key] ? list.map(() => new THREE.Color(pick(TINT[key]))) : null;
     loader.load(cfg.file, (gltf) => {
       const parts = prepGLB(gltf, cfg.h, cfg.yaw);
+      // non-loose props (trees, bushes, stops, statue…) are the high-poly ones
+      // and don't need the flying index-mapping, so bucket them into spatial
+      // cells → each InstancedMesh gets a tight bounding sphere and frustum-culls
+      // (one map-spanning InstancedMesh never culls — every tree drew every frame).
+      if (!LOOSE.has(key)) {
+        const PROP_CHUNK = 140;
+        const cells = new Map();
+        for (let i = 0; i < list.length; i++) {
+          const ck = Math.floor(list[i].x / PROP_CHUNK) + ',' + Math.floor(list[i].z / PROP_CHUNK);
+          let arr = cells.get(ck); if (!arr) { arr = []; cells.set(ck, arr); } arr.push(i);
+        }
+        const M = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
+        for (const part of parts) {
+          for (const idx of cells.values()) {
+            const im = new THREE.InstancedMesh(part.geometry, part.material, idx.length);
+            im.castShadow = true;
+            for (let j = 0; j < idx.length; j++) {
+              const i = idx[j];
+              q.setFromAxisAngle(up, list[i].yaw); p.set(list[i].x, CURB_Y, list[i].z); M.compose(p, q, one); im.setMatrixAt(j, M);
+              if (cols) im.setColorAt(j, cols[i]);
+            }
+            if (im.instanceColor) im.instanceColor.needsUpdate = true;
+            im.computeBoundingSphere();
+            group.add(im);
+          }
+        }
+        return;
+      }
       const partIms = [];
       for (const part of parts) {
         const im = new THREE.InstancedMesh(part.geometry, part.material, list.length);
