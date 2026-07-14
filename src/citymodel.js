@@ -33,8 +33,17 @@ export function createCityModel() {
 
   // blocks: one building per block, except the central block which is a plaza
   const mid = (BLOCKS - 1) / 2; // block index of the centre (BLOCKS odd → integer)
+  // special-purpose blocks for the heist arc (#115): the bank two blocks north
+  // of the plaza on the finance ring; the gang hideout and the chop-shop as
+  // edge lockups in opposite corners — a proper getaway across the district.
+  const SPECIAL = {
+    [`${mid},${mid + 2}`]: 'bank',        // finance ring, two blocks north of the plaza
+    [`1,${BLOCKS - 2}`]: 'hideout',       // NW villa edge — a proper getaway run
+    [`5,${BLOCKS - 2}`]: 'chopshop',      // same edge, a short "dump the car" leg away
+  };
   const buildings = [];
   let plaza = null;
+  const special = {};
   for (let bi = 0; bi < BLOCKS; bi++) {
     for (let bj = 0; bj < BLOCKS; bj++) {
       const x0 = nodes[bi] + ROAD_HW, x1 = nodes[bi + 1] - ROAD_HW;
@@ -42,6 +51,17 @@ export function createCityModel() {
       const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
       const slab = { minX: x0, maxX: x1, minZ: z0, maxZ: z1 };
       if (bi === mid && bj === mid) { plaza = { ...slab, cx, cz, bi, bj }; continue; }
+      const specialKind = SPECIAL[`${bi},${bj}`];
+      if (specialKind) {
+        const b = {
+          minX: x0 + SIDEWALK, maxX: x1 - SIDEWALK,
+          minZ: z0 + SIDEWALK, maxZ: z1 - SIDEWALK,
+          slab, height: specialKind === 'bank' ? 14 : 6, kind: 'residential', category: specialKind, cx, cz, bi, bj,
+        };
+        buildings.push(b);
+        special[specialKind] = b;
+        continue;
+      }
       const r = (bi * 7 + bj * 13) % 5;
       // Radial density gradient: expensive finance towers in the centre fade
       // out to residential mid-rises and low villas at the edge. `urban` is high
@@ -74,6 +94,7 @@ export function createCityModel() {
     nodes, min, max,
     intersections, signalized,
     buildings, plaza,
+    bank: special.bank, hideout: special.hideout, chopshop: special.chopshop,
     spawn: { pos: [sx, 0, sz], yaw: 0 },
   };
 }

@@ -66,6 +66,7 @@ export function createMissions(scene, model) {
   let state = 'none', active = -1, pickup = null, drop = null;
   let timer = 0, cash = 0, delivered = 0;
   let style = 0, styleHot = 0, msgTimer = 0, tt = 0, shownBeat = -1;
+  let busy = false; // an outside job (the heist) owns the HUD & blocks deliveries
 
   function dispatch(text) { msg.textContent = text; msg.style.opacity = '1'; msgTimer = 6; }
   function maybeBeat() { for (const [n, text] of DISPATCH) { if (n === delivered && n !== shownBeat) { shownBeat = n; dispatch(text); break; } } }
@@ -75,6 +76,7 @@ export function createMissions(scene, model) {
     pickupB.group.visible = false; dropB.group.visible = false;
   }
   function select(i) {
+    if (busy) { dispatch('DISPATCH: Gör klart det du håller på med först.'); return false; }
     if (state === 'carrying') { dispatch('DISPATCH: Leverera det du har först.'); return false; }
     if (i < 0 || i >= jobs.length) return false;
     active = i; pickup = jobs[i].pickup; drop = jobs[i].drop;
@@ -116,7 +118,8 @@ export function createMissions(scene, model) {
       if (msgTimer > 0) { msgTimer -= dt; if (msgTimer <= 0) msg.style.opacity = '0'; }
 
       if (!st) { obj.style.display = cashEl.style.display = styleEl.style.display = 'none'; return; }
-      obj.style.display = cashEl.style.display = styleEl.style.display = 'block';
+      obj.style.display = busy ? 'none' : 'block';
+      cashEl.style.display = styleEl.style.display = 'block';
       const p = st.pos;
 
       // STYLE builds from air time and drifting; decays when you're just cruising
@@ -125,6 +128,7 @@ export function createMissions(scene, model) {
 
       cashEl.textContent = `$ ${cash}`;
       styleEl.textContent = style > 0.05 ? `STYLE x${(1 + style).toFixed(1)}` : '';
+      if (busy) return; // the heist owns the objective line
 
       if (state === 'none') {
         obj.innerHTML = '🗺️ TRYCK PÅ KARTAN &nbsp;·&nbsp; VÄLJ UPPDRAG';
@@ -149,6 +153,10 @@ export function createMissions(scene, model) {
     select,
     activeIndex: () => active,
     state: () => state,
+    // hooks for the heist (and future side jobs): share the wallet & the HUD
+    setBusy(v) { busy = v; },
+    addCash(n, label) { cash += n; if (label) dispatch(label); },
+    styleMult: () => 1 + style,
     dbg: () => ({ state, cash, delivered, pickup: pickup && { x: pickup.x, z: pickup.z }, drop: drop && { x: drop.x, z: drop.z } }),
   };
 }
