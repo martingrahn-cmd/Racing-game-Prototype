@@ -723,7 +723,7 @@ function loop(now) {
     signals.update(dt);
     if (worldGeom) { worldGeom.updateDoors(dt, st ? st.pos : null); worldGeom.updateClock(daynight.params.timeOfDay); lodStat = worldGeom.updateLOD(camera.position, (MOBILE ? 180 : 340) * (TIERS[tier].lodMul || 1)); }
     if (worldCollision) worldCollision.update(dt, st ? st.pos : null);
-    worldTraffic.update(dt, st ? st.pos : null);
+    worldTraffic.update(dt, st ? st.pos : null, st ? st.heading : null);
     if (pedestrians) pedestrians.update(dt, st ? st.pos : null);
     // camera stands in for the player in attract mode so distance-culled props
     // (and nothing else — speed is 0, so no knock-launches) still cull sensibly

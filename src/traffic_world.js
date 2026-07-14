@@ -65,11 +65,16 @@ function mergeCarByMaterial(holder) {
 const CRUISE = 11;          // m/s ≈ 40 km/h
 const ACCEL = 7, DECEL = 20;
 const CAR_LEN = 4.3;
-// touch devices run a much lighter fleet — each car is an animated group, so
-// the count drives CPU + draw cost directly
+// touch devices run a lighter fleet — each car is an animated group, so the
+// count drives CPU + draw cost. Post-#109 the GPU headroom allows a much
+// denser fleet than the old survival numbers: dodging traffic IS the game.
 const MOBILE = ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0;
-const DAY_CARS = MOBILE ? 30 : 96;    // pool size at full daylight (4× map; frustum-culled off-screen)
-const NIGHT_CARS = MOBILE ? 14 : 36;  // rendered cars at night
+const DAY_CARS = MOBILE ? 64 : 120;   // pool size at full daylight (recycled near the player)
+const NIGHT_CARS = MOBILE ? 28 : 48;  // rendered cars at night
+// Recycle radius: beyond this the car is invisible (past fog/far plane), so it
+// teleports to a street 3–4 blocks from the player and drives on. Keeps the
+// whole fleet where the player actually is, instead of spread over the 4× map.
+const RECYCLE_R2 = (MOBILE ? 430 : 620) ** 2;
 const MODELS = [
   'assets/traffic/taxi.glb', 'assets/traffic/sedan1.glb', 'assets/traffic/sedan2.glb',
   'assets/traffic/suv.glb', 'assets/traffic/sports1.glb', 'assets/traffic/sports2.glb',
@@ -228,11 +233,48 @@ export function createWorldTraffic(scene, model, signals, count = DAY_CARS) {
     car.applied = true;
   }
 
+  // Teleport a far-gone (invisible) car onto a street 1–3 blocks from the
+  // player so the streets around the player never empty out. Never drops one
+  // inside the player's forward view cone at visible range — respawns land
+  // behind, to the side, or deep in the fog, so there is no visible pop.
+  function recycle(car, playerPos, heading) {
+    const pi = Math.max(1, Math.min(BLOCKS - 1, Math.round((playerPos.x - nodes[0]) / PITCH)));
+    const pj = Math.max(1, Math.min(BLOCKS - 1, Math.round((playerPos.z - nodes[0]) / PITCH)));
+    for (let tries = 0; tries < 12; tries++) {
+      const di = Math.floor(Math.random() * 7) - 3, dj = Math.floor(Math.random() * 7) - 3;
+      const ch = Math.max(Math.abs(di), Math.abs(dj));
+      if (ch < 1) continue;
+      const ni = pi + di, nj = pj + dj;
+      if (ni < 1 || ni > BLOCKS - 1 || nj < 1 || nj > BLOCKS - 1) continue;
+      const dir = pickDir(ni, nj, [0, 0]);
+      const t = 0.15 + Math.random() * 0.6;
+      const rx = -dir[1], rz = dir[0];
+      const px = nodes[ni] + (nodes[ni + dir[0]] - nodes[ni]) * t + rx * LANE;
+      const pz = nodes[nj] + (nodes[nj + dir[1]] - nodes[nj]) * t + rz * LANE;
+      const ex = px - playerPos.x, ez = pz - playerPos.z;
+      const d = Math.hypot(ex, ez);
+      if (d < 60 || d > 400) continue;                    // not on top of the player, not past the recycle radius
+      if (heading && d < 320 && (ex * heading.x + ez * heading.z) / d > 0.45) continue; // visible front cone
+      car.ni = ni; car.nj = nj; car.dir = dir; car.t = t;
+      car.speed = CRUISE * (0.5 + Math.random() * 0.5);
+      car.group.position.set(px, 0, pz);
+      car.yaw = Math.atan2(dir[0], dir[1]);
+      car.group.rotation.y = car.yaw;
+      return;
+    }
+  }
+
   return {
     cars,
-    update(dt, playerPos) {
+    update(dt, playerPos, heading) {
       const night = 1 - getDayness();
       const st = signals.getState();
+      if (playerPos) {
+        for (const car of cars) {
+          const ex = car.group.position.x - playerPos.x, ez = car.group.position.z - playerPos.z;
+          if (ex * ex + ez * ez > RECYCLE_R2) recycle(car, playerPos, heading);
+        }
+      }
       for (const car of cars) {
         const Ax = nodes[car.ni], Az = nodes[car.nj];
         const bi = car.ni + car.dir[0], bj = car.nj + car.dir[1];

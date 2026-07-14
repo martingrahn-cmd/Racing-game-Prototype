@@ -387,13 +387,28 @@ function buildStreetLamps(group, model) {
   const armG = new THREE.BoxGeometry(1.8, 0.12, 0.12); armG.translate(-0.8, POST_H - 0.2, 0);
   const darkGeo = mergePN([postG, armG]);
   const headGeo = new THREE.BoxGeometry(0.52, 0.36, 0.44); headGeo.translate(-1.6, POST_H - 0.34, 0);
-  const poolGeo = new THREE.CircleGeometry(4.6, 18); poolGeo.rotateX(-Math.PI / 2); poolGeo.translate(-1.6, 0.05, 0);
+  // The light pool was a flat additive disc — a knife-hard bright circle on the
+  // asphalt. A quad with a radial-gradient texture fades to black at the rim
+  // (black = invisible under additive blending), so the pool melts into the
+  // street — and it's 2 triangles instead of 18 (#111).
+  const poolTex = (() => {
+    const c = document.createElement('canvas'); c.width = c.height = 128;
+    const x = c.getContext('2d');
+    const g = x.createRadialGradient(64, 64, 3, 64, 64, 64);
+    g.addColorStop(0, 'rgba(255,255,255,1.0)');
+    g.addColorStop(0.4, 'rgba(255,255,255,0.55)');
+    g.addColorStop(0.75, 'rgba(255,255,255,0.16)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    x.fillStyle = g; x.fillRect(0, 0, 128, 128);
+    return new THREE.CanvasTexture(c);
+  })();
+  const poolGeo = new THREE.PlaneGeometry(11.5, 11.5); poolGeo.rotateX(-Math.PI / 2); poolGeo.translate(-1.6, 0.05, 0);
 
   const metalMat = new THREE.MeshStandardMaterial({ color: 0x33373d, roughness: 0.5, metalness: 0.7 });
   const headMat = new THREE.MeshStandardMaterial({ color: 0x2a2418, emissive: 0xffdca0, emissiveIntensity: 0.05, roughness: 0.5 });
   registerEmissive(headMat, 0.05, 2.6);
-  const poolMat = new THREE.MeshBasicMaterial({ color: 0xffdca0, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
-  registerOpacity(poolMat, 0.0, 0.3);
+  const poolMat = new THREE.MeshBasicMaterial({ color: 0xffdca0, map: poolTex, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+  registerOpacity(poolMat, 0.0, 0.5); // hotter core than the old flat disc, but melts out at the rim
 
   const lamps = [];
   const seg = [0.34, 0.68];
