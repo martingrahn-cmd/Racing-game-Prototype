@@ -1,12 +1,14 @@
-// Open-world minimap + full map (press M).
+// Open-world minimap + full map.
 // - Corner minimap: a zoomed, heading-up view of the streets around the car —
 //   the MAP rotates and the player arrow stays fixed pointing up (driving-game
 //   convention), with the GPS route and an edge-clamped objective marker.
-// - Full map (M): the whole district as a north-up miniature.
+//   TAP IT (or press M) to open the full map.
+// - Full map: the whole district as a north-up miniature — and the JOB BOARD:
+//   open deliveries show as $-pins; tap one to take the mission (#114).
 // The city itself (roads, district-tinted blocks, building footprints, the
 // plaza with its fountain/pond/playground) is rendered ONCE into an offscreen
 // canvas; per-frame work is one rotated blit + the dynamic overlays.
-export function createWorldMap(model) {
+export function createWorldMap(model, missions) {
   const nodes = model.nodes;
   const lo = model.min - model.ROAD_HW, hi = model.max + model.ROAD_HW;
   const span = hi - lo || 1;
@@ -105,20 +107,58 @@ export function createWorldMap(model) {
   const el = document.getElementById('minimap');
   el.style.display = 'block';
   el.style.borderRadius = '50%';   // heading-up map spins — keep it round
+  el.style.pointerEvents = 'auto';
+  el.style.cursor = 'pointer';
   const ctx = el.getContext('2d');
 
   const big = document.createElement('canvas');
+  big.id = 'bigmap';
   big.width = big.height = 760;
-  big.style.cssText = 'position:fixed;inset:0;margin:auto;z-index:19;display:none;'
+  // above the objective HUD line (z 40) so the map header isn't overprinted,
+  // below the dispatcher toast (z 42) so "leverera först" still shows
+  big.style.cssText = 'position:fixed;inset:0;margin:auto;z-index:41;display:none;'
     + 'background:rgba(9,12,17,0.94);border:1px solid rgba(255,255,255,0.14);border-radius:14px;'
     + 'box-shadow:0 16px 60px rgba(0,0,0,0.6);pointer-events:none;max-width:90vw;max-height:84vh;';
   document.body.appendChild(big);
   const bctx = big.getContext('2d');
+  // the big map's fixed world->px mapping (shared by drawing and tap hit-tests)
+  const BS = big.width, BPAD = 40;
+  const bk = (BS - BPAD * 2) / span;
+  const BX = (wx) => BPAD + (hi - wx) * bk;   // mirrored to match the corner map
+  const BY = (wz) => BS - (BPAD + (wz - lo) * bk);
+
   let bigOpen = false;
+  function setBig(open) {
+    bigOpen = open;
+    big.style.display = open ? 'block' : 'none';
+    big.style.pointerEvents = open ? 'auto' : 'none';
+  }
   const typing = (e) => e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA');
   addEventListener('keydown', (e) => {
     if (typing(e)) return;
-    if (e.code === 'KeyM') { bigOpen = !bigOpen; big.style.display = bigOpen ? 'block' : 'none'; }
+    if (e.code === 'KeyM') setBig(!bigOpen);
+  });
+  // tap the corner minimap to open the job board — the touch-first path
+  el.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); setBig(!bigOpen); });
+  // taps on the big map: take a job, or close (✕ / anywhere else)
+  big.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const rect = big.getBoundingClientRect();
+    const cx = (e.clientX - rect.left) * (big.width / rect.width);
+    const cy = (e.clientY - rect.top) * (big.height / rect.height);
+    if (cx > big.width - 70 && cy < 70) { setBig(false); return; }   // ✕
+    if (missions) {
+      const jb = missions.jobs();
+      for (let i = 0; i < jb.length; i++) {
+        if (jb[i].active) continue;
+        const dx = cx - BX(jb[i].x), dy = cy - BY(jb[i].z);
+        if (dx * dx + dy * dy < 34 * 34) {
+          if (missions.select(i)) setBig(false);
+          return;                              // carrying: stay open, dispatcher explains
+        }
+      }
+    }
+    setBig(false);
   });
 
   const nearestNode = (v) => {
@@ -186,7 +226,18 @@ export function createWorldMap(model) {
           ctx.beginPath(); ctx.arc(-dx * ppm, -dz * ppm, rr, 0, Math.PI * 2); ctx.fill();
         };
         dot(pickup, '#35d07f', 4.5, dbg && dbg.state === 'idle');
-        dot(drop, '#ffa030', 4.5, dbg && dbg.state !== 'idle');
+        dot(drop, '#ffa030', 4.5, dbg && dbg.state === 'carrying');
+        // open jobs as faint pins, so you spot work while cruising
+        if (missions) {
+          const jb = missions.jobs();
+          ctx.fillStyle = 'rgba(53,208,127,0.5)';
+          for (const j of jb) {
+            if (j.active) continue;
+            const dx = j.x - carPos.x, dz = j.z - carPos.z;
+            if (Math.hypot(dx, dz) > maxM) continue;
+            ctx.beginPath(); ctx.arc(-dx * ppm, -dz * ppm, 3, 0, Math.PI * 2); ctx.fill();
+          }
+        }
         ctx.restore();
         // upright N at the rim, toward world north (rim angle follows the map spin)
         const nR = S / 2 - 10;
@@ -207,41 +258,68 @@ export function createWorldMap(model) {
         ctx.beginPath(); ctx.arc(S / 2, S / 2, S / 2 - 1, 0, Math.PI * 2); ctx.stroke();
       }
 
-      // ---------------- full map (M): north-up city miniature ----------------
+      // ---------------- full map: north-up city miniature + job board ----------------
       if (bigOpen) {
-        const S = big.width, pad = 40;
-        const k = (S - pad * 2) / span;
-        const X = (wx) => pad + (hi - wx) * k;   // mirrored to match the corner map
-        const Y = (wz) => S - (pad + (wz - lo) * k);
-        bctx.clearRect(0, 0, S, S);
-        bctx.drawImage(base, pad, pad, S - pad * 2, S - pad * 2);
+        bctx.clearRect(0, 0, BS, BS);
+        bctx.drawImage(base, BPAD, BPAD, BS - BPAD * 2, BS - BPAD * 2);
         if (r) {
           bctx.strokeStyle = routeCol;
           bctx.lineWidth = 5; bctx.lineCap = 'round'; bctx.lineJoin = 'round';
           bctx.setLineDash([14, 10]);
           bctx.beginPath();
-          r.forEach((p, i) => (i ? bctx.lineTo(X(p[0]), Y(p[1])) : bctx.moveTo(X(p[0]), Y(p[1]))));
+          r.forEach((p, i) => (i ? bctx.lineTo(BX(p[0]), BY(p[1])) : bctx.moveTo(BX(p[0]), BY(p[1]))));
           bctx.stroke();
           bctx.setLineDash([]);
         }
-        const dot = (p, col, rr) => { if (!p) return; bctx.fillStyle = col; bctx.beginPath(); bctx.arc(X(p.x), Y(p.z), rr, 0, Math.PI * 2); bctx.fill(); };
+        const dot = (p, col, rr) => { if (!p) return; bctx.fillStyle = col; bctx.beginPath(); bctx.arc(BX(p.x), BY(p.z), rr, 0, Math.PI * 2); bctx.fill(); };
         dot(pickup, '#35d07f', 8);
         dot(drop, '#ffa030', 8);
+        // the job board: open deliveries as tappable $-pins
+        const carrying = missions && missions.state() === 'carrying';
+        if (missions) {
+          const jb = missions.jobs();
+          bctx.textAlign = 'center';
+          for (let i = 0; i < jb.length; i++) {
+            if (jb[i].active) continue;              // the taken job is the route/beacon
+            const x = BX(jb[i].x), y = BY(jb[i].z);
+            bctx.globalAlpha = carrying ? 0.38 : 1;
+            bctx.fillStyle = 'rgba(10,16,12,0.88)';
+            bctx.beginPath(); bctx.arc(x, y, 17, 0, Math.PI * 2); bctx.fill();
+            bctx.strokeStyle = '#35d07f'; bctx.lineWidth = 2.5;
+            bctx.beginPath(); bctx.arc(x, y, 17, 0, Math.PI * 2); bctx.stroke();
+            bctx.fillStyle = '#35d07f';
+            bctx.font = 'bold 15px "DejaVu Sans Mono",monospace'; bctx.textBaseline = 'middle';
+            bctx.fillText('📦', x, y + 1);
+            bctx.font = 'bold 13px "DejaVu Sans Mono",monospace';
+            bctx.fillStyle = '#c9f3da';
+            bctx.fillText(`~$${jb[i].pay}`, x, y + 30);
+            bctx.globalAlpha = 1;
+          }
+          bctx.textAlign = 'left';
+        }
         // player arrow (north-up map -> the arrow itself rotates with the car;
         // negated yaw on the mirrored axis)
-        bctx.save(); bctx.translate(X(carPos.x), Y(carPos.z)); bctx.rotate(-yaw);
+        bctx.save(); bctx.translate(BX(carPos.x), BY(carPos.z)); bctx.rotate(-yaw);
         bctx.fillStyle = '#ff3b30';
         bctx.strokeStyle = 'rgba(0,0,0,0.55)'; bctx.lineWidth = 2;
         bctx.beginPath(); bctx.moveTo(0, -12); bctx.lineTo(7.8, 8.5); bctx.lineTo(0, 4.4); bctx.lineTo(-7.8, 8.5); bctx.closePath();
         bctx.fill(); bctx.stroke();
         bctx.restore();
-        bctx.fillStyle = 'rgba(255,255,255,0.9)';
+        // header + close ✕
+        const choosing = missions && missions.state() === 'none';
+        bctx.fillStyle = choosing ? '#35d07f' : 'rgba(255,255,255,0.9)';
         bctx.font = 'bold 22px "DejaVu Sans Mono",monospace';
         bctx.textAlign = 'left'; bctx.textBaseline = 'alphabetic';
-        bctx.fillText('APEX CITY — KARTA', 40, 44);
+        bctx.fillText(choosing ? 'VÄLJ UPPDRAG — TRYCK PÅ ETT 📦' : 'APEX CITY — KARTA', 40, 44);
         bctx.font = '14px "DejaVu Sans Mono",monospace';
         bctx.fillStyle = 'rgba(255,255,255,0.6)';
-        bctx.fillText('M för att stänga · grön = hämta · orange = lämna', 40, big.height - 30);
+        bctx.fillText(carrying ? 'leverera till orange innan tiden går ut' : 'tryck på ett paket för att anta jobbet · ✕ stänger', 40, big.height - 30);
+        bctx.strokeStyle = 'rgba(255,255,255,0.7)'; bctx.lineWidth = 2.5;
+        bctx.beginPath(); bctx.arc(BS - 42, 42, 17, 0, Math.PI * 2); bctx.stroke();
+        bctx.beginPath();
+        bctx.moveTo(BS - 49, 35); bctx.lineTo(BS - 35, 49);
+        bctx.moveTo(BS - 35, 35); bctx.lineTo(BS - 49, 49);
+        bctx.stroke();
       }
     },
   };
