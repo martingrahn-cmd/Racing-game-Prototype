@@ -14,9 +14,14 @@ export function createWorldMap(model) {
   const VIEW_R = 170;        // metres of world shown from centre to minimap edge
 
   // ---------------------------------------------------------- static city art
+  // NOTE the mirrored x-axis: in this world, facing +z ("north"), the car's
+  // RIGHT is world -x (turning right DECREASES yaw). A conventional east-right
+  // map is therefore mirror-flipped against what the driver experiences —
+  // "target to the right on the map" was actually to the LEFT (#113). Drawing
+  // -x to the right makes map-right always match car-right.
   const BASE = 1024;
   const k0 = BASE / span;                    // base-canvas pixels per metre
-  const bx = (wx) => (wx - lo) * k0;
+  const bx = (wx) => (hi - wx) * k0;         // mirrored: -x to the right
   const by = (wz) => BASE - (wz - lo) * k0;  // north up
   const base = document.createElement('canvas');
   base.width = base.height = BASE;
@@ -153,9 +158,9 @@ export function createWorldMap(model) {
         ctx.beginPath(); ctx.arc(S / 2, S / 2, S / 2 - 1, 0, Math.PI * 2); ctx.clip();
         ctx.fillStyle = '#161b22'; ctx.fillRect(0, 0, S, S);
         ctx.translate(S / 2, S / 2);
-        ctx.rotate(-yaw);                         // heading up: rotate the world, not the arrow
-        // world point -> px in this rotated frame
-        const PX = (wx) => (wx - carPos.x) * ppm;
+        ctx.rotate(yaw);                          // heading up: rotate the world, not the arrow
+        // world point -> px in this rotated frame (x mirrored, see above)
+        const PX = (wx) => -(wx - carPos.x) * ppm;
         const PY = (wz) => -(wz - carPos.z) * ppm;
         // rotated blit of the pre-rendered city
         const s2 = ppm / k0;
@@ -178,7 +183,7 @@ export function createWorldMap(model) {
           const d = Math.hypot(dx, dz);
           if (d > maxM) { if (!clamp) return; dx *= maxM / d; dz *= maxM / d; }
           ctx.fillStyle = col;
-          ctx.beginPath(); ctx.arc(dx * ppm, -dz * ppm, rr, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.arc(-dx * ppm, -dz * ppm, rr, 0, Math.PI * 2); ctx.fill();
         };
         dot(pickup, '#35d07f', 4.5, dbg && dbg.state === 'idle');
         dot(drop, '#ffa030', 4.5, dbg && dbg.state !== 'idle');
@@ -188,7 +193,7 @@ export function createWorldMap(model) {
         ctx.fillStyle = 'rgba(255,255,255,0.75)';
         ctx.font = `bold ${Math.round(S * 0.085)}px "DejaVu Sans Mono",monospace`;
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText('N', S / 2 - nR * Math.sin(yaw), S / 2 - nR * Math.cos(yaw));
+        ctx.fillText('N', S / 2 + nR * Math.sin(yaw), S / 2 - nR * Math.cos(yaw));
         // fixed player arrow, always pointing up
         ctx.save();
         ctx.translate(S / 2, S / 2);
@@ -206,7 +211,7 @@ export function createWorldMap(model) {
       if (bigOpen) {
         const S = big.width, pad = 40;
         const k = (S - pad * 2) / span;
-        const X = (wx) => pad + (wx - lo) * k;
+        const X = (wx) => pad + (hi - wx) * k;   // mirrored to match the corner map
         const Y = (wz) => S - (pad + (wz - lo) * k);
         bctx.clearRect(0, 0, S, S);
         bctx.drawImage(base, pad, pad, S - pad * 2, S - pad * 2);
@@ -222,8 +227,9 @@ export function createWorldMap(model) {
         const dot = (p, col, rr) => { if (!p) return; bctx.fillStyle = col; bctx.beginPath(); bctx.arc(X(p.x), Y(p.z), rr, 0, Math.PI * 2); bctx.fill(); };
         dot(pickup, '#35d07f', 8);
         dot(drop, '#ffa030', 8);
-        // player arrow (north-up map -> the arrow itself rotates with the car)
-        bctx.save(); bctx.translate(X(carPos.x), Y(carPos.z)); bctx.rotate(yaw);
+        // player arrow (north-up map -> the arrow itself rotates with the car;
+        // negated yaw on the mirrored axis)
+        bctx.save(); bctx.translate(X(carPos.x), Y(carPos.z)); bctx.rotate(-yaw);
         bctx.fillStyle = '#ff3b30';
         bctx.strokeStyle = 'rgba(0,0,0,0.55)'; bctx.lineWidth = 2;
         bctx.beginPath(); bctx.moveTo(0, -12); bctx.lineTo(7.8, 8.5); bctx.lineTo(0, 4.4); bctx.lineTo(-7.8, 8.5); bctx.closePath();

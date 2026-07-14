@@ -131,7 +131,7 @@ if (WORLD) {
   worldCollision = collision;
   // debug handles for automated (CDP) perf checks — lets a test drive the LOD /
   // crowd logic from an arbitrary probe point without playing there
-  window.__world = { geom: worldGeom, traffic: worldTraffic, peds: pedestrians, model };
+  window.__world = { geom: worldGeom, traffic: worldTraffic, peds: pedestrians, model, missions };
   drive = createDrive(null, 0, { world: { spawn: model.spawn, collision, curbY: model.CURB_Y, ramps: worldObj.ramps } });
   // atmospheric fade at the district edge — and clip the far plane to just past
   // the fog so all the fully-fogged (invisible) distant buildings down long
