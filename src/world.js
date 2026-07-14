@@ -45,6 +45,15 @@ function extractFaceGroups(geo, keepIndices) {
 }
 
 const BUILDING_VC_MAT = new THREE.MeshStandardMaterial({ roughness: 0.88, metalness: 0, vertexColors: true });
+// give a non-indexed geometry a trivial index so it can merge with indexed ones
+function ensureIndexed(g) {
+  if (g.index) return g;
+  const n = g.attributes.position.count;
+  const idx = n > 65535 ? new Uint32Array(n) : new Uint16Array(n);
+  for (let i = 0; i < n; i++) idx[i] = i;
+  g.setIndex(new THREE.BufferAttribute(idx, 1));
+  return g;
+}
 function mergeFlatToVC(parts) {
   if (parts.length < 2) return parts;
   for (const p of parts) {
@@ -53,9 +62,12 @@ function mergeFlatToVC(parts) {
   }
   const geos = [];
   for (const p of parts) {
-    const g = p.geometry.index ? p.geometry.toNonIndexed() : p.geometry.clone();
+    // KEEP the index (never toNonIndexed): the GLBs reuse each vertex ~3×, so
+    // an indexed merge runs the vertex shader ~3× less for the same picture
+    const g = p.geometry.clone();
     for (const name of Object.keys(g.attributes)) if (name !== 'position' && name !== 'normal') g.deleteAttribute(name);
     if (!g.attributes.normal) g.computeVertexNormals();
+    ensureIndexed(g);
     const n = g.attributes.position.count, col = new Float32Array(n * 3), c = p.material.color;
     for (let i = 0; i < n; i++) { col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
     g.setAttribute('color', new THREE.BufferAttribute(col, 3));
@@ -274,9 +286,9 @@ export function buildWorld(scene, model) {
   // each street-facing house gets its own fenced front garden + garage + driveway
   // (#79: individual plots, not one fence around the whole block)
   const parkedSpots = buildVillaGardens(group, villaSpots, CURB_Y,
-    { fenceMat, garageWall, garageDoor, garageRoof, hedgeMat, hedgeGeo });
+    { fenceMat, garageWall, garageDoor, garageRoof, hedgeMat, hedgeGeo }, lodCells);
   buildVillas(group, villaSpots, CURB_Y, lodCells);
-  buildParkedCars(group, parkedSpots, CURB_Y);
+  buildParkedCars(group, parkedSpots, CURB_Y, lodCells);
   buildStreetLamps(group, model);
 
   // -------------------------------------------------- distant filler
@@ -301,7 +313,7 @@ export function buildWorld(scene, model) {
     group, colliders: { buildings: buildingAABBs }, obstacles, ramps,
     updateDoors: (dt, playerPos) => updateDoors(doors, dt, playerPos),
     updateClock: (timeOfDay) => updateClock(plazaR && plazaR.clockHands, timeOfDay),
-    updateLOD: (camPos) => updateBuildingLOD(lodCells, camPos),
+    updateLOD: (camPos, radiusM) => updateBuildingLOD(lodCells, camPos, radiusM),
   };
 }
 
@@ -459,6 +471,9 @@ const CHUNK = 90; // metres per cell — must be smaller than the LOD detail rad
 // (~1170 draw calls). Bigger cells = far fewer draw calls; the extra triangles
 // pulled in at cell edges are free (#101).
 const CLUTTER_CHUNK = 300;
+// opts.lodCells: near-ground clutter (fences, hedges, driveways) that is
+// invisible from afar registers its cells for hide-only LOD — beyond the
+// detail radius the whole cell stops drawing (no impostor needed at that size).
 function addChunked(group, geometry, material, list, place, opts = {}) {
   if (!list.length) return;
   const cells = new Map();
@@ -476,6 +491,11 @@ function addChunked(group, geometry, material, list, place, opts = {}) {
     if (im.instanceColor) im.instanceColor.needsUpdate = true;
     im.computeBoundingSphere();
     group.add(im);
+    if (opts.lodCells) {
+      let sx = 0, sz = 0; for (const a of arr) { sx += a.x; sz += a.z; }
+      im.visible = false; // first updateBuildingLOD() shows the cells in range
+      opts.lodCells.push({ x: sx / arr.length, z: sz / arr.length, detail: [im], boxes: [], near: false });
+    }
   }
 }
 
@@ -511,6 +531,10 @@ function addBuildingLOD(group, parts, list, cellsOut, opts = {}) {
   // instance's matrix in the coarse mesh (#99).
   const BOX_CHUNK = CHUNK * 4;
   const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
+  // opts.castShadow false: small models (parked cars on mobile) skip the shadow
+  // pass — their blob at mobile shadow resolution is invisible, but rendering
+  // them twice is not
+  const cast = opts.castShadow !== false;
   const coarse = new Map();
   for (const a of list) {
     const key = Math.floor(a.x / BOX_CHUNK) + ',' + Math.floor(a.z / BOX_CHUNK);
@@ -519,7 +543,7 @@ function addBuildingLOD(group, parts, list, cellsOut, opts = {}) {
   }
   for (const arr of coarse.values()) {
     const boxIm = new THREE.InstancedMesh(boxGeo, boxMat, arr.length);
-    boxIm.castShadow = true; boxIm.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    boxIm.castShadow = cast; boxIm.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     for (let i = 0; i < arr.length; i++) {
       const a = arr[i]; q.setFromAxisAngle(up, a.yaw); p.set(a.x, y, a.z); M.compose(p, q, one);
       a._boxMat = M.clone(); boxIm.setMatrixAt(i, M);
@@ -541,25 +565,29 @@ function addBuildingLOD(group, parts, list, cellsOut, opts = {}) {
     if (im.instanceColor) im.instanceColor.needsUpdate = true;
     im.computeBoundingSphere();
   };
+  // opts.lodScale < 1 shrinks the detail radius for small models (parked cars
+  // don't need house-sized detail distance)
+  const s2 = (opts.lodScale || 1) ** 2;
   for (const arr of cells.values()) {
     let sx = 0, sz = 0; for (const a of arr) { sx += a.x; sz += a.z; } sx /= arr.length; sz /= arr.length;
     const detail = [];
     for (const part of parts) {
       const im = new THREE.InstancedMesh(part.geometry, part.material, arr.length);
-      im.castShadow = true; im.receiveShadow = true; im.visible = false; fill(im, arr);
+      im.castShadow = cast; im.receiveShadow = true; im.visible = false; fill(im, arr);
       group.add(im); detail.push(im);
     }
     // the box instances (in their coarse meshes) this cell must hide when near
     const boxes = arr.map((a) => ({ im: a._boxIm, i: a._bi, mat: a._boxMat }));
-    cellsOut.push({ x: sx, z: sz, detail, boxes, near: false, ZERO });
+    cellsOut.push({ x: sx, z: sz, detail, boxes, near: false, ZERO, s2 });
   }
 }
-function updateBuildingLOD(cells, camPos) {
+function updateBuildingLOD(cells, camPos, radiusM) {
   if (!cells || !camPos) return { near: 0, total: 0 };
   let near = 0;
+  const r2 = radiusM ? radiusM * radiusM : LOD_NEAR2;
   const dirty = new Set();
   for (const c of cells) {
-    const isNear = ((c.x - camPos.x) ** 2 + (c.z - camPos.z) ** 2) < LOD_NEAR2;
+    const isNear = ((c.x - camPos.x) ** 2 + (c.z - camPos.z) ** 2) < r2 * (c.s2 || 1);
     if (isNear) near++;
     if (c.near !== isNear) {                 // state changed → swap detail <-> impostor
       c.near = isNear;
@@ -672,7 +700,7 @@ function buildVillas(group, spots, CURB_Y, lodCells) {
 // this is thousands of houses, so each kind of piece (fence, garage body/door/
 // roof, driveway, hedge) is drawn as a single InstancedMesh. Returns the
 // parked-car spots.
-function buildVillaGardens(group, spots, CURB_Y, mats) {
+function buildVillaGardens(group, spots, CURB_Y, mats, lodCells) {
   const { fenceMat, garageWall, garageDoor, garageRoof, hedgeMat } = mats;
   const driveMat = new THREE.MeshStandardMaterial({ color: 0x6a6a6f, roughness: 0.95, metalness: 0 });
   const parkedSpots = [];
@@ -716,11 +744,13 @@ function buildVillaGardens(group, spots, CURB_Y, mats) {
     for (let c = 0; c < nCars; c++) parkedSpots.push({ x: grx + ox * (2.6 + c * 3.0), z: grz + oz * (2.6 + c * 3.0), yaw: gyaw });
   }
   // --- draw each collected kind as spatially-chunked InstancedMeshes ---
+  // fences/driveways/hedges are knee-high clutter: invisible past the detail
+  // radius, so their cells register for hide-only LOD (lodCells)
   const box = new THREE.BoxGeometry(1, 1, 1);
   const q0 = new THREE.Quaternion(), p0 = new THREE.Vector3(), sc = new THREE.Vector3();
-  addChunked(group, box, fenceMat, fences, (a, i, M) => { p0.set(a.x, CURB_Y + FH / 2, a.z); sc.set(a.sx, FH, a.sz); M.compose(p0, q0, sc); });
-  addChunked(group, box, driveMat, drives, (a, i, M) => { p0.set(a.x, CURB_Y + 0.05, a.z); sc.set(a.sx, 0.06, a.sz); M.compose(p0, q0, sc); }, { castShadow: false, receiveShadow: true });
-  addChunked(group, box, hedgeMat, hedges, (a, i, M) => { p0.set(a.x, CURB_Y + 0.4, a.z); sc.set(1.1, 0.8, 1.1); M.compose(p0, q0, sc); });
+  addChunked(group, box, fenceMat, fences, (a, i, M) => { p0.set(a.x, CURB_Y + FH / 2, a.z); sc.set(a.sx, FH, a.sz); M.compose(p0, q0, sc); }, { lodCells, castShadow: !LOD_MOBILE });
+  addChunked(group, box, driveMat, drives, (a, i, M) => { p0.set(a.x, CURB_Y + 0.05, a.z); sc.set(a.sx, 0.06, a.sz); M.compose(p0, q0, sc); }, { castShadow: false, receiveShadow: true, lodCells });
+  addChunked(group, box, hedgeMat, hedges, (a, i, M) => { p0.set(a.x, CURB_Y + 0.4, a.z); sc.set(1.1, 0.8, 1.1); M.compose(p0, q0, sc); }, { lodCells, castShadow: !LOD_MOBILE });
   const bodyGeo = new THREE.BoxGeometry(4.4, 2.7, 4.4); bodyGeo.translate(0, 1.35, 0);
   const doorGeo = new THREE.BoxGeometry(3.0, 2.0, 0.12); doorGeo.translate(0, 1.0, 2.26);
   const roofGeo = new THREE.ConeGeometry(3.5, 1.3, 4); roofGeo.rotateY(Math.PI / 4); roofGeo.translate(0, 3.35, 0);
@@ -770,8 +800,12 @@ function buildRamps(group, model) {
   return ramps;
 }
 
-// A few parked cars outside the villa garages (instanced from a traffic model).
-function buildParkedCars(group, spots, CURB_Y) {
+// Parked cars outside the villa garages (instanced from a traffic model).
+// ~2 500 sedans × ~3 000 tris was over a million triangles in any street-level
+// frustum — parked cars were the single heaviest thing in view (#109). Merge
+// the sedan into one vertex-coloured indexed geometry and run it through the
+// same LOD as the buildings: full detail near, a 12-tri box impostor far.
+function buildParkedCars(group, spots, CURB_Y, lodCells) {
   if (!spots.length) return;
   const loader = makeGLTFLoader();
   loader.load('assets/traffic/sedan1.glb', (gltf) => {
@@ -783,44 +817,19 @@ function buildParkedCars(group, spots, CURB_Y) {
       .multiply(new THREE.Matrix4().makeTranslation(-(box.min.x + box.max.x) / 2, -box.min.y, -(box.min.z + box.max.z) / 2));
     const parts = [];
     gltf.scene.traverse((o) => { if (o.isMesh) { const g = o.geometry.clone(); g.applyMatrix4(o.matrixWorld); g.applyMatrix4(N); parts.push({ geometry: g, material: o.material }); } });
-    // Bucket the parked-car spots into CHUNK cells so each cell's InstancedMesh
-    // gets a tight bounding sphere and frustum-culls. A single map-spanning
-    // InstancedMesh (2000+ sedans × ~2800 tris) never culls and drew ~7M
-    // triangles every frame regardless of where the camera looked (#98).
-    const cells = new Map();
-    for (const s of spots) {
-      const key = Math.floor(s.x / CLUTTER_CHUNK) + ',' + Math.floor(s.z / CLUTTER_CHUNK);
-      let arr = cells.get(key); if (!arr) { arr = []; cells.set(key, arr); }
-      arr.push(s);
-    }
-    const M = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
-    for (const arr of cells.values()) {
-      for (const part of parts) {
-        const im = new THREE.InstancedMesh(part.geometry, part.material, arr.length);
-        im.castShadow = true; im.receiveShadow = true;
-        for (let i = 0; i < arr.length; i++) { q.setFromAxisAngle(up, arr[i].yaw); p.set(arr[i].x, CURB_Y, arr[i].z); M.compose(p, q, one); im.setMatrixAt(i, M); }
-        im.computeBoundingSphere();
-        group.add(im);
-      }
-    }
+    addBuildingLOD(group, mergeFlatToVC(parts), spots, lodCells, { y: CURB_Y, impostorColor: 0x4a4e54, lodScale: 0.6, castShadow: !LOD_MOBILE });
   }, undefined, () => { /* skip parked cars if the model fails */ });
 }
 
-// Merge indexed geometries keeping position + normal (for untextured props).
+// Merge geometries keeping position + normal (for untextured props) — indexed,
+// so merged lamp posts etc. keep their vertex reuse.
 function mergePN(geos) {
-  const arrs = geos.map((g) => (g.index ? g.toNonIndexed() : g));
-  let vc = 0; for (const g of arrs) vc += g.attributes.position.count;
-  const pos = new Float32Array(vc * 3), nor = new Float32Array(vc * 3);
-  let o = 0;
-  for (const g of arrs) {
-    pos.set(g.attributes.position.array, o * 3);
-    nor.set(g.attributes.normal.array, o * 3);
-    o += g.attributes.position.count;
-  }
-  const out = new THREE.BufferGeometry();
-  out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  out.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
-  return out;
+  return mergeGeometries(geos.map((src) => {
+    const g = src.clone();
+    for (const name of Object.keys(g.attributes)) if (name !== 'position' && name !== 'normal') g.deleteAttribute(name);
+    if (!g.attributes.normal) g.computeVertexNormals();
+    return ensureIndexed(g);
+  }), false);
 }
 
 // central plaza: fountain, statue, trees, a small playground

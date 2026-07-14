@@ -41,7 +41,8 @@ const uiTyping = () => {
 const canvas = document.getElementById('game');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// soft 5-tap PCF is fill-heavy; plain PCF on phones reads the same at their resolution
+renderer.shadowMap.type = MOBILE ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
 renderer.info.autoReset = false; // reset once per frame so counts cover all passes
 
 // Post pipeline does tonemapping/grading in HDR; fall back to direct
@@ -77,8 +78,12 @@ const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.3, 52
 const sun = new THREE.DirectionalLight(0xfff1dc, 3.1);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
-sun.shadow.camera.left = -160; sun.shadow.camera.right = 160;
-sun.shadow.camera.top = 160; sun.shadow.camera.bottom = -160;
+// tighter shadow box on phones: crisper texels AND far fewer casters re-drawn
+// into the shadow map each frame (the pass renders 360° around the car, so it
+// was as expensive as the visible frame — #109)
+const SH_EXT = MOBILE ? 90 : 160;
+sun.shadow.camera.left = -SH_EXT; sun.shadow.camera.right = SH_EXT;
+sun.shadow.camera.top = SH_EXT; sun.shadow.camera.bottom = -SH_EXT;
 sun.shadow.camera.near = 10; sun.shadow.camera.far = 900;
 sun.shadow.bias = -0.0004;
 sun.shadow.normalBias = 0.6;
@@ -101,6 +106,15 @@ let worldModel = null, worldAttract = false, worldCollision = null, worldGeom = 
 let props = null, worldMap = null;
 if (WORLD) {
   const model = createCityModel();
+  // ?x=&z=(&yaw=) teleports the spawn — photo bug reports carry coordinates, so
+  // a reported spot is directly revisitable (and automated tests can probe it)
+  {
+    const q = new URLSearchParams(location.search);
+    const qx = parseFloat(q.get('x')), qz = parseFloat(q.get('z'));
+    if (Number.isFinite(qx) && Number.isFinite(qz)) {
+      model.spawn = { pos: [qx, 0, qz], yaw: parseFloat(q.get('yaw') || '0') || 0 };
+    }
+  }
   worldModel = model; worldAttract = true;
   const worldObj = buildWorld(scene, model);
   worldGeom = worldObj;
@@ -115,6 +129,9 @@ if (WORLD) {
     obstacles: [...worldObj.obstacles, ...signals.obstacles, ...props.obstacles],
   });
   worldCollision = collision;
+  // debug handles for automated (CDP) perf checks — lets a test drive the LOD /
+  // crowd logic from an arbitrary probe point without playing there
+  window.__world = { geom: worldGeom, traffic: worldTraffic, peds: pedestrians, model };
   drive = createDrive(null, 0, { world: { spawn: model.spawn, collision, curbY: model.CURB_Y, ramps: worldObj.ramps } });
   // atmospheric fade at the district edge — and clip the far plane to just past
   // the fog so all the fully-fogged (invisible) distant buildings down long
@@ -266,7 +283,9 @@ refreshBugLog();
 function buildReport(note) {
   const c = bugCtx;
   if (!c) return '';
-  const teleport = c.mode === 'world' ? '?world=1' : `?s=${c.s}&tod=${c.tod.toFixed(2)}`;
+  const teleport = c.mode === 'world'
+    ? `?world=1&x=${c.pos.x.toFixed(0)}&z=${c.pos.z.toFixed(0)}&tod=${c.tod.toFixed(2)}`
+    : `?s=${c.s}&tod=${c.tod.toFixed(2)}`;
   return [
     `[BUGG]${note ? ' ' + note.split('\n')[0].slice(0, 60) : ''}`,
     '',
@@ -555,12 +574,15 @@ canvas.addEventListener('pointerdown', (e) => {
 // (post-processing off — it's the most fill-heavy pass; the auto-scaler drops
 // further if a frame budget is still missed).
 const PR_CAP = MOBILE ? 1.3 : Infinity;
+// lodMul scales the building/parked-car detail radius (world mode): the lowest
+// tiers trade detail distance — not more resolution — because at the floor the
+// GPU is vertex-bound, not fill-bound (#109).
 const TIERS = [
-  { pr: 2.0, shadows: 2048, post: true },
-  { pr: 1.5, shadows: 2048, post: true },
-  { pr: 1.25, shadows: 1024, post: true },
-  { pr: 1.0, shadows: 1024, post: false },
-  { pr: 1.0, shadows: 0, post: false },
+  { pr: 2.0, shadows: 2048, post: true, lodMul: 1 },
+  { pr: 1.5, shadows: 2048, post: true, lodMul: 1 },
+  { pr: 1.25, shadows: 1024, post: true, lodMul: 1 },
+  { pr: 1.0, shadows: 1024, post: false, lodMul: 0.9 },
+  { pr: 1.0, shadows: 0, post: false, lodMul: 0.66 },
 ];
 let tier = MOBILE ? 3 : 0;
 function applyTier() {
@@ -593,6 +615,24 @@ applyTier();
 // climb, and each switch resets both counters.
 const TIER_CEIL = MOBILE ? 1 : 0;   // don't push mobile past tier 1 (PR is capped anyway)
 let slowFrames = 0, fastFrames = 0;
+
+// Mobile night: the moon-shadow pass re-renders every caster around the car —
+// it cost as much as the visible frame and is invisible at phone resolution.
+// Freeze the map instead of toggling shadowMap.enabled: no material recompiles.
+// The frozen map is rendered ONCE from an empty 1 m box, so nothing is shadowed
+// (receivers outside the box sample "no shadow") — by day the real box returns.
+let shadowFrozen = false;
+function setShadowFreeze(freeze) {
+  shadowFrozen = freeze;
+  const ext = freeze ? 1 : SH_EXT;
+  sun.shadow.camera.left = -ext; sun.shadow.camera.right = ext;
+  sun.shadow.camera.top = ext; sun.shadow.camera.bottom = -ext;
+  sun.shadow.camera.near = freeze ? 0.1 : 10;
+  sun.shadow.camera.far = freeze ? 0.2 : 900;
+  sun.shadow.camera.updateProjectionMatrix();
+  renderer.shadowMap.needsUpdate = true; // bake one map with the new box
+  renderer.shadowMap.autoUpdate = !freeze;
+}
 function autoQuality(dt) {
   if (dt > 1 / 42) { slowFrames++; fastFrames = 0; }
   else { slowFrames = Math.max(0, slowFrames - 2); if (dt < 1 / 57) fastFrames++; else fastFrames = Math.max(0, fastFrames - 1); }
@@ -660,6 +700,10 @@ function loop(now) {
     smoothedPos = null;
   }
   daynight.update(dt);
+  if (MOBILE && renderer.shadowMap.enabled) {
+    const freeze = daynight.dayness < 0.12;
+    if (freeze !== shadowFrozen) setShadowFreeze(freeze);
+  }
   const kmh = updateCamera(dt, perfTime, st);
   if (WORLD) {
     // Night-adaptive draw distance on mobile: the killer view is a long straight
@@ -677,11 +721,13 @@ function loop(now) {
       if (Math.abs(camera.far - far) > 2) { camera.far = far; camera.updateProjectionMatrix(); }
     }
     signals.update(dt);
-    if (worldGeom) { worldGeom.updateDoors(dt, st ? st.pos : null); worldGeom.updateClock(daynight.params.timeOfDay); lodStat = worldGeom.updateLOD(camera.position); }
+    if (worldGeom) { worldGeom.updateDoors(dt, st ? st.pos : null); worldGeom.updateClock(daynight.params.timeOfDay); lodStat = worldGeom.updateLOD(camera.position, (MOBILE ? 150 : 340) * (TIERS[tier].lodMul || 1)); }
     if (worldCollision) worldCollision.update(dt, st ? st.pos : null);
     worldTraffic.update(dt, st ? st.pos : null);
     if (pedestrians) pedestrians.update(dt, st ? st.pos : null);
-    if (props) props.update(dt, st ? st.pos : null, st ? st.heading : null, st ? st.speed : 0);
+    // camera stands in for the player in attract mode so distance-culled props
+    // (and nothing else — speed is 0, so no knock-launches) still cull sensibly
+    if (props) props.update(dt, st ? st.pos : camera.position, st ? st.heading : null, st ? st.speed : 0);
     if (missions) missions.update(dt, st);
     if (worldMap) worldMap.update(st ? st.pos : carGround, st ? st.yaw : worldModel.spawn.yaw, missions.dbg());
   } else {

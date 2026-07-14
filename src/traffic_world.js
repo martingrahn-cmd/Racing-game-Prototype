@@ -27,7 +27,8 @@ function mergeCarByMaterial(holder) {
   const local = new THREE.Matrix4();
   for (const m of meshes) {
     const mats = Array.isArray(m.material) ? m.material : [m.material];
-    const src = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+    // keep the index (vertex reuse ≈ half the vertex-shader work per car)
+    const src = m.geometry.clone();
     // keep only the attributes every car mesh reliably shares, so the merge
     // never bails on a mismatched attribute set
     for (const name of Object.keys(src.attributes)) {
@@ -37,6 +38,12 @@ function mergeCarByMaterial(holder) {
     if (!src.attributes.uv) {
       const n = src.attributes.position.count;
       src.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(n * 2), 2));
+    }
+    if (!src.index) {
+      const n = src.attributes.position.count;
+      const idx = n > 65535 ? new Uint32Array(n) : new Uint16Array(n);
+      for (let i = 0; i < n; i++) idx[i] = i;
+      src.setIndex(new THREE.BufferAttribute(idx, 1));
     }
     local.copy(inv).multiply(m.matrixWorld);
     src.applyMatrix4(local);

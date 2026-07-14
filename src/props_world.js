@@ -50,31 +50,52 @@ const TINT = {
 // light "loose" props that go flying when you plough into them (the rest —
 // trees, statues, bus shelters, phone booths — stay bolted down).
 const LOOSE = new Set(['bench', 'bicycle', 'cone', 'barrier', 'trash', 'meter', 'hydrant', 'bush', 'flowers']);
+// knee-to-shoulder-high clutter that is invisible past the detail radius: its
+// cells are hidden by distance every frame (tall silhouettes — trees, bus
+// shelters, street signs, the statue — always draw). ~1750 bicycles alone were
+// ~0.4M in-frustum triangles you could never actually see (#109).
+const HIDE_SMALL = new Set([...LOOSE, 'hedge', 'dumpster', 'picnic']);
+const MOBILE = ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0;
+const HIDE_R2 = (MOBILE ? 170 : 420) ** 2;
 
 // merge geometries sharing a material: keep position + normal + uv + vertex
 // colour (zero-fill uv / white-fill colour where a sub-mesh lacks it) so both
 // textured AND vertex-coloured props survive instancing (else the latter — pine,
-// oak — render black once their COLOR_0 attribute is dropped).
+// oak — render black once their COLOR_0 attribute is dropped). INDEXED merge:
+// keeping the index keeps vertex reuse (~2-3× fewer vertex-shader runs).
 function mergeGroup(geos) {
-  const g = geos.map((x) => (x.index ? x.toNonIndexed() : x));
-  let vc = 0; for (const x of g) vc += x.attributes.position.count;
-  let colSize = 0; for (const x of g) { if (x.attributes.color) { colSize = x.attributes.color.itemSize; break; } }
-  const pos = new Float32Array(vc * 3), nor = new Float32Array(vc * 3), uv = new Float32Array(vc * 2);
-  const col = colSize ? new Float32Array(vc * colSize) : null;
-  let o = 0;
+  let anyCol = false;
+  for (const x of geos) if (x.attributes.color) { anyCol = true; break; }
+  let vTotal = 0, iTotal = 0;
+  const g = geos.map((x) => {
+    let N = x.attributes.normal; if (!N) { x.computeVertexNormals(); }
+    vTotal += x.attributes.position.count;
+    iTotal += x.index ? x.index.count : x.attributes.position.count;
+    return x;
+  });
+  const pos = new Float32Array(vTotal * 3), nor = new Float32Array(vTotal * 3), uv = new Float32Array(vTotal * 2);
+  const col = anyCol ? new Float32Array(vTotal * 3) : null;
+  const idx = vTotal > 65535 ? new Uint32Array(iTotal) : new Uint16Array(iTotal);
+  let o = 0, io = 0;
   for (const x of g) {
     const A = x.attributes.position, n = A.count;
-    let N = x.attributes.normal; if (!N) { x.computeVertexNormals(); N = x.attributes.normal; }
-    pos.set(A.array, o * 3); nor.set(N.array, o * 3);
+    pos.set(A.array, o * 3); nor.set(x.attributes.normal.array, o * 3);
     if (x.attributes.uv) uv.set(x.attributes.uv.array, o * 2);
-    if (col) { if (x.attributes.color) col.set(x.attributes.color.array, o * colSize); else col.fill(1, o * colSize, (o + n) * colSize); }
+    if (col) {
+      const c = x.attributes.color;
+      if (c) { for (let i = 0; i < n; i++) { col[(o + i) * 3] = c.getX(i); col[(o + i) * 3 + 1] = c.getY(i); col[(o + i) * 3 + 2] = c.getZ(i); } }
+      else col.fill(1, o * 3, (o + n) * 3);
+    }
+    if (x.index) { const ix = x.index.array; for (let i = 0; i < ix.length; i++) idx[io + i] = ix[i] + o; io += ix.length; }
+    else { for (let i = 0; i < n; i++) idx[io + i] = o + i; io += n; }
     o += n;
   }
   const out = new THREE.BufferGeometry();
   out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   out.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
   out.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
-  if (col) out.setAttribute('color', new THREE.BufferAttribute(col, colSize));
+  if (col) out.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  out.setIndex(new THREE.BufferAttribute(idx, 1));
   return out;
 }
 
@@ -220,6 +241,12 @@ export function createProps(scene, model) {
 
   // ---- load each prop GLB and build its instanced sets ----
   const looseGroups = [];   // {ims:[InstancedMesh], objs:[flying state]} for knock-flying props
+  const hideCells = [];     // {x, z, vis, ims} — small-clutter cells hidden past the detail radius
+  const cellCentre = (list, idx) => {
+    let sx = 0, sz = 0;
+    for (const i of idx) { sx += list[i].x; sz += list[i].z; }
+    return { x: sx / idx.length, z: sz / idx.length };
+  };
   const CAR_R = 1.7;
   const loader = makeGLTFLoader();
   for (const [key, list] of Object.entries(spots)) {
@@ -241,10 +268,11 @@ export function createProps(scene, model) {
           let arr = cells.get(ck); if (!arr) { arr = []; cells.set(ck, arr); } arr.push(i);
         }
         const M = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
-        for (const part of parts) {
-          for (const idx of cells.values()) {
+        for (const idx of cells.values()) {
+          const cellIms = [];
+          for (const part of parts) {
             const im = new THREE.InstancedMesh(part.geometry, part.material, idx.length);
-            im.castShadow = true;
+            im.castShadow = HIDE_SMALL.has(key) ? !MOBILE : true; // small clutter: no mobile shadow pass
             for (let j = 0; j < idx.length; j++) {
               const i = idx[j];
               q.setFromAxisAngle(up, list[i].yaw); p.set(list[i].x, CURB_Y, list[i].z); M.compose(p, q, one); im.setMatrixAt(j, M);
@@ -253,7 +281,9 @@ export function createProps(scene, model) {
             if (im.instanceColor) im.instanceColor.needsUpdate = true;
             im.computeBoundingSphere();
             group.add(im);
+            cellIms.push(im);
           }
+          if (HIDE_SMALL.has(key)) hideCells.push({ ...cellCentre(list, idx), vis: true, ims: cellIms });
         }
         return;
       }
@@ -276,7 +306,7 @@ export function createProps(scene, model) {
         const partIms = [];
         for (const part of parts) {
           const im = new THREE.InstancedMesh(part.geometry, part.material, idx.length);
-          im.castShadow = true;
+          im.castShadow = !MOBILE; // loose clutter is all small — skip the mobile shadow pass
           im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
           for (let j = 0; j < idx.length; j++) {
             const i = idx[j];
@@ -293,6 +323,7 @@ export function createProps(scene, model) {
           ims: partIms,
           objs: idx.map((i, j) => ({ i: j, x: list[i].x, z: list[i].z, yaw: list[i].yaw, hit2, launched: false, rested: false })),
         });
+        hideCells.push({ ...cellCentre(list, idx), vis: true, ims: partIms });
       }
     }, undefined, () => { /* skip a prop that fails to load */ });
   }
@@ -306,6 +337,13 @@ export function createProps(scene, model) {
   function restMatrix(o, out) { _e.set(0, o.yaw, 0); _q.setFromEuler(_e); _p.set(o.x, CURB_Y, o.z); return out.compose(_p, _q, _one); }
 
   function update(dt, playerPos, heading, speed) {
+    // small-clutter cells: draw only within the detail radius (see HIDE_SMALL)
+    if (playerPos) {
+      for (const c of hideCells) {
+        const vis = ((c.x - playerPos.x) ** 2 + (c.z - playerPos.z) ** 2) < HIDE_R2;
+        if (vis !== c.vis) { c.vis = vis; for (const im of c.ims) im.visible = vis; }
+      }
+    }
     for (const grp of looseGroups) {
       let dirty = false;
       for (const o of grp.objs) {

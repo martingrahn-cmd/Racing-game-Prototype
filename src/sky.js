@@ -28,6 +28,11 @@ export function buildSky(scene) {
           vDir = normalize(position);
           vec4 mv = modelViewMatrix * vec4(position, 1.0);
           gl_Position = projectionMatrix * mv;
+          // pin the dome to the far plane: the mobile far plane sits at a few
+          // hundred metres (#102) — far inside the 3600 m dome, which otherwise
+          // clips away entirely (black sky, no stars). At max depth the sky
+          // draws first and everything else covers it, whatever camera.far is.
+          gl_Position.z = gl_Position.w * 0.99999;
         }
       `,
       fragmentShader: /* glsl */`
