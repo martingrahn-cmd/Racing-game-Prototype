@@ -32,9 +32,17 @@ function bakeFlipbookVC(fb) {
   for (const frame of fb) {
     const geos = [];
     for (const p of frame) {
-      const g = p.geometry.index ? p.geometry.toNonIndexed() : p.geometry.clone();
+      // keep the index: a character reuses each vertex ~4×, so an indexed merge
+      // runs the vertex shader ~4× less per pedestrian for the same picture
+      const g = p.geometry.clone();
       for (const name of Object.keys(g.attributes)) if (name !== 'position' && name !== 'normal') g.deleteAttribute(name);
       if (!g.attributes.normal) g.computeVertexNormals();
+      if (!g.index) {
+        const n0 = g.attributes.position.count;
+        const idx = n0 > 65535 ? new Uint32Array(n0) : new Uint16Array(n0);
+        for (let i = 0; i < n0; i++) idx[i] = i;
+        g.setIndex(new THREE.BufferAttribute(idx, 1));
+      }
       const n = g.attributes.position.count, col = new Float32Array(n * 3), c = p.material.color;
       for (let i = 0; i < n; i++) { col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
       g.setAttribute('color', new THREE.BufferAttribute(col, 3));
