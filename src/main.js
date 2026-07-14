@@ -582,7 +582,7 @@ const TIERS = [
   { pr: 1.5, shadows: 2048, post: true, lodMul: 1 },
   { pr: 1.25, shadows: 1024, post: true, lodMul: 1 },
   { pr: 1.0, shadows: 1024, post: false, lodMul: 0.9 },
-  { pr: 1.0, shadows: 0, post: false, lodMul: 0.66 },
+  { pr: 1.0, shadows: 0, post: false, lodMul: 0.7 },
 ];
 let tier = MOBILE ? 3 : 0;
 function applyTier() {
@@ -721,7 +721,7 @@ function loop(now) {
       if (Math.abs(camera.far - far) > 2) { camera.far = far; camera.updateProjectionMatrix(); }
     }
     signals.update(dt);
-    if (worldGeom) { worldGeom.updateDoors(dt, st ? st.pos : null); worldGeom.updateClock(daynight.params.timeOfDay); lodStat = worldGeom.updateLOD(camera.position, (MOBILE ? 150 : 340) * (TIERS[tier].lodMul || 1)); }
+    if (worldGeom) { worldGeom.updateDoors(dt, st ? st.pos : null); worldGeom.updateClock(daynight.params.timeOfDay); lodStat = worldGeom.updateLOD(camera.position, (MOBILE ? 180 : 340) * (TIERS[tier].lodMul || 1)); }
     if (worldCollision) worldCollision.update(dt, st ? st.pos : null);
     worldTraffic.update(dt, st ? st.pos : null);
     if (pedestrians) pedestrians.update(dt, st ? st.pos : null);
