@@ -18,6 +18,32 @@ import { mergeGeometries } from '../vendor/utils/BufferGeometryUtils.js';
 // and people were merged. Bake each part's colour into vertex colours and merge
 // to ONE geometry + ONE shared material → one draw per building cell, same look
 // (#107). Bails (returns parts unchanged) if any part is textured or emissive.
+// Pull the vertices of specific material-group indices out of a non-indexed
+// geometry into a standalone geometry (position/normal/uv), so a multi-material
+// box can be split into per-material pieces and merged with its neighbours.
+function extractFaceGroups(geo, keepIndices) {
+  const keep = new Set(keepIndices);
+  const pos = geo.attributes.position, nor = geo.attributes.normal, uv = geo.attributes.uv;
+  const ranges = geo.groups.filter((g) => keep.has(g.materialIndex));
+  let total = 0; for (const r of ranges) total += r.count;
+  const P = new Float32Array(total * 3), N = new Float32Array(total * 3), U = new Float32Array(total * 2);
+  let o = 0;
+  for (const r of ranges) {
+    for (let i = 0; i < r.count; i++) {
+      const s = r.start + i;
+      P[o * 3] = pos.getX(s); P[o * 3 + 1] = pos.getY(s); P[o * 3 + 2] = pos.getZ(s);
+      N[o * 3] = nor.getX(s); N[o * 3 + 1] = nor.getY(s); N[o * 3 + 2] = nor.getZ(s);
+      if (uv) { U[o * 2] = uv.getX(s); U[o * 2 + 1] = uv.getY(s); }
+      o++;
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(P, 3));
+  g.setAttribute('normal', new THREE.BufferAttribute(N, 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(U, 2));
+  return g;
+}
+
 const BUILDING_VC_MAT = new THREE.MeshStandardMaterial({ roughness: 0.88, metalness: 0, vertexColors: true });
 function mergeFlatToVC(parts) {
   if (parts.length < 2) return parts;
@@ -141,15 +167,28 @@ export function buildWorld(scene, model) {
   const curbSide = new THREE.MeshStandardMaterial({ map: curbTex, roughness: 0.85, metalness: 0 });
   const slabs = model.buildings.map((b) => b.slab);
   if (model.plaza) slabs.push(model.plaza);
+  // Each sidewalk slab was a multi-material box — a BoxGeometry with 6 face
+  // groups draws up to 6 calls, and at ~290 blocks a broadside view spent 150+
+  // draws on kerbs alone (#108). Merge them by material into coarse cells: the
+  // sidewalk top and the kerb sides each become one mesh per ~300 m cell.
+  const swCells = new Map();
   for (const s of slabs) {
     const w = s.maxX - s.minX, d = s.maxZ - s.minZ;
-    const box = new THREE.Mesh(
-      new THREE.BoxGeometry(w, CURB_Y, d),
-      [curbSide, curbSide, swTop, curbSide, curbSide, curbSide],
-    );
-    box.position.set((s.minX + s.maxX) / 2, CURB_Y / 2, (s.minZ + s.maxZ) / 2);
-    box.receiveShadow = true;
-    group.add(box);
+    const box = new THREE.BoxGeometry(w, CURB_Y, d).toNonIndexed();
+    box.translate((s.minX + s.maxX) / 2, CURB_Y / 2, (s.minZ + s.maxZ) / 2);
+    const top = extractFaceGroups(box, [2]);        // +y face → sidewalk texture
+    const side = extractFaceGroups(box, [0, 1, 3, 4, 5]); // the 4 kerb sides (+ unseen bottom)
+    const key = Math.floor((s.minX + s.maxX) / 2 / CLUTTER_CHUNK) + ',' + Math.floor((s.minZ + s.maxZ) / 2 / CLUTTER_CHUNK);
+    let cell = swCells.get(key); if (!cell) { cell = { top: [], side: [] }; swCells.set(key, cell); }
+    cell.top.push(top); cell.side.push(side);
+  }
+  for (const cell of swCells.values()) {
+    for (const [geos, mat] of [[cell.top, swTop], [cell.side, curbSide]]) {
+      const merged = geos.length === 1 ? geos[0] : mergeGeometries(geos, false);
+      if (!merged) continue;
+      merged.computeBoundingSphere();
+      const m = new THREE.Mesh(merged, mat); m.receiveShadow = true; group.add(m);
+    }
   }
 
   // -------------------------------------------------- buildings
