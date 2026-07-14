@@ -505,11 +505,34 @@ function addChunked(group, geometry, material, list, place, opts = {}) {
 // one box InstancedMesh, register the pair, and updateBuildingLOD() swaps them
 // by camera distance each frame. `parts` are the baked {geometry,material} of
 // the model (base at y=0). Returns nothing; pushes {x,z,detail,box} into cells.
-// Full detail within this radius, cheap box impostor beyond. Much tighter on
-// mobile — down a straight avenue a 280 m radius renders hundreds of high-poly
-// buildings; 130 m keeps only the nearest block or two detailed.
+// Full detail within this radius, cheap box impostor beyond. Tighter on mobile
+// — down a straight avenue a 280 m radius renders hundreds of high-poly
+// buildings; ~180 m keeps a couple of blocks detailed (and the adaptive tiers
+// shrink it further via lodMul when the GPU is struggling).
 const LOD_MOBILE = (typeof navigator !== 'undefined') && (('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0);
-const LOD_NEAR2 = (LOD_MOBILE ? 150 : 340) ** 2;
+const LOD_NEAR2 = (LOD_MOBILE ? 180 : 340) ** 2;
+
+// Average a model's vertex colours into a wall tone and a roof tone (top ~18%
+// of its height), so the impostor box can wear the building's own colours.
+// Returns null when the parts carry no vertex colours (textured models) — the
+// caller then relies on the per-instance tint or the flat fallback colour.
+function sampleWallRoofColors(parts, bb) {
+  const yCut = bb.max.y - (bb.max.y - bb.min.y) * 0.18;
+  let wr = 0, wg = 0, wb = 0, wn = 0, rr = 0, rg = 0, rb = 0, rn = 0;
+  for (const part of parts) {
+    const col = part.geometry.attributes.color, pos = part.geometry.attributes.position;
+    if (!col) continue;
+    for (let i = 0; i < col.count; i++) {
+      if (pos.getY(i) >= yCut) { rr += col.getX(i); rg += col.getY(i); rb += col.getZ(i); rn++; }
+      else { wr += col.getX(i); wg += col.getY(i); wb += col.getZ(i); wn++; }
+    }
+  }
+  if (!wn && !rn) return null;
+  const wall = wn ? new THREE.Color(wr / wn, wg / wn, wb / wn) : new THREE.Color(rr / rn, rg / rn, rb / rn);
+  const roof = rn ? new THREE.Color(rr / rn, rg / rn, rb / rn) : wall.clone();
+  return { wall, roof };
+}
+
 function addBuildingLOD(group, parts, list, cellsOut, opts = {}) {
   if (!list.length || !parts.length) return;
   const y = opts.y || 0;
@@ -519,7 +542,24 @@ function addBuildingLOD(group, parts, list, cellsOut, opts = {}) {
   const size = bb.getSize(new THREE.Vector3());
   const boxGeo = new THREE.BoxGeometry(Math.max(size.x, 1), Math.max(size.y, 1), Math.max(size.z, 1));
   boxGeo.translate((bb.min.x + bb.max.x) / 2, bb.min.y + size.y / 2, (bb.min.z + bb.max.z) / 2);
-  const boxMat = new THREE.MeshStandardMaterial({ color: opts.impostorColor || 0x8a8886, roughness: 0.92, metalness: 0 });
+  // The impostor wears the building's own colours instead of a flat placeholder
+  // (the distant "white boxes", #110): bake the sampled wall tone onto the box
+  // sides and the roof tone onto its top face. Per-instance tints (the villa
+  // palette) apply to the boxes too, so a dark-red villa is a dark-red box
+  // long before the detail swap.
+  const sampled = sampleWallRoofColors(parts, bb);
+  {
+    const nrm = boxGeo.attributes.normal, n = boxGeo.attributes.position.count;
+    const col = new Float32Array(n * 3);
+    const wall = sampled ? sampled.wall : new THREE.Color(0xffffff);
+    const roof = sampled ? sampled.roof : new THREE.Color(0xffffff);
+    for (let i = 0; i < n; i++) { const c = nrm.getY(i) > 0.5 ? roof : wall; col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
+    boxGeo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  }
+  // white base whenever the box is coloured by sampling or per-instance tint;
+  // impostorColor stays only as the fallback for unsampled, untinted models
+  const baseCol = (sampled || opts.color) ? 0xffffff : (opts.impostorColor || 0x8a8886);
+  const boxMat = new THREE.MeshStandardMaterial({ color: baseCol, vertexColors: true, roughness: 0.92, metalness: 0 });
   const q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3(), M = new THREE.Matrix4();
 
   // Box impostors are 12-triangle throwaways, so what actually costs us on the
@@ -547,7 +587,9 @@ function addBuildingLOD(group, parts, list, cellsOut, opts = {}) {
     for (let i = 0; i < arr.length; i++) {
       const a = arr[i]; q.setFromAxisAngle(up, a.yaw); p.set(a.x, y, a.z); M.compose(p, q, one);
       a._boxMat = M.clone(); boxIm.setMatrixAt(i, M);
+      if (opts.color) boxIm.setColorAt(i, opts.color(a, i));
     }
+    if (boxIm.instanceColor) boxIm.instanceColor.needsUpdate = true;
     boxIm.computeBoundingSphere();
     group.add(boxIm);
     for (const a of arr) a._boxIm = boxIm;
@@ -817,7 +859,7 @@ function buildParkedCars(group, spots, CURB_Y, lodCells) {
       .multiply(new THREE.Matrix4().makeTranslation(-(box.min.x + box.max.x) / 2, -box.min.y, -(box.min.z + box.max.z) / 2));
     const parts = [];
     gltf.scene.traverse((o) => { if (o.isMesh) { const g = o.geometry.clone(); g.applyMatrix4(o.matrixWorld); g.applyMatrix4(N); parts.push({ geometry: g, material: o.material }); } });
-    addBuildingLOD(group, mergeFlatToVC(parts), spots, lodCells, { y: CURB_Y, impostorColor: 0x4a4e54, lodScale: 0.6, castShadow: !LOD_MOBILE });
+    addBuildingLOD(group, mergeFlatToVC(parts), spots, lodCells, { y: CURB_Y, impostorColor: 0x4a4e54, lodScale: 0.5, castShadow: !LOD_MOBILE });
   }, undefined, () => { /* skip parked cars if the model fails */ });
 }
 

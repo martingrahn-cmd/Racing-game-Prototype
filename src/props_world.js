@@ -56,7 +56,7 @@ const LOOSE = new Set(['bench', 'bicycle', 'cone', 'barrier', 'trash', 'meter', 
 // ~0.4M in-frustum triangles you could never actually see (#109).
 const HIDE_SMALL = new Set([...LOOSE, 'hedge', 'dumpster', 'picnic']);
 const MOBILE = ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0;
-const HIDE_R2 = (MOBILE ? 170 : 420) ** 2;
+const HIDE_R2 = (MOBILE ? 190 : 420) ** 2;
 
 // merge geometries sharing a material: keep position + normal + uv + vertex
 // colour (zero-fill uv / white-fill colour where a sub-mesh lacks it) so both
