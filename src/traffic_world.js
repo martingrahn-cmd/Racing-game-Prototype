@@ -18,7 +18,7 @@ import { makeGLTFLoader, rigWheels } from './car.js';
 // by material it's ~6 draws and moves/rotates identically as the container's
 // child. Trades per-wheel spin (imperceptible on distant traffic) for half the
 // draws; the player's own car keeps its rig (#105).
-function mergeCarByMaterial(holder) {
+export function mergeCarByMaterial(holder) {
   holder.updateMatrixWorld(true);
   const inv = holder.matrixWorld.clone().invert();
   const meshes = [];

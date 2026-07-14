@@ -224,6 +224,8 @@ export function buildWorld(scene, model) {
     // (the edge) get a garden lot with a few detached houses — both instanced below
     if (b.category === 'residential') { collectApartments(b, aptSpots); return; }
     if (b.category === 'villa') { villaBlocks.push(b); collectVillas(b, villaSpots); return; }
+    // heist landmarks (bank / hideout / chop-shop) are built by heist.js
+    if (b.category === 'bank' || b.category === 'hideout' || b.category === 'chopshop') return;
     const w = b.maxX - b.minX, d = b.maxZ - b.minZ, h = b.height;
     const cx = b.cx, cz = b.cz;
     const f = facades[b.kind];

@@ -8,7 +8,7 @@
 // The city itself (roads, district-tinted blocks, building footprints, the
 // plaza with its fountain/pond/playground) is rendered ONCE into an offscreen
 // canvas; per-frame work is one rotated blit + the dynamic overlays.
-export function createWorldMap(model, missions) {
+export function createWorldMap(model, missions, heist) {
   const nodes = model.nodes;
   const lo = model.min - model.ROAD_HW, hi = model.max + model.ROAD_HW;
   const span = hi - lo || 1;
@@ -67,7 +67,13 @@ export function createWorldMap(model, missions) {
         const f = (x) => Math.max(0, Math.min(255, Math.round(((v >> x) & 255) * (1 + d))));
         return `rgb(${f(16)},${f(8)},${f(0)})`;
       };
-      if (b.category === 'finance') {
+      if (b.category === 'bank') {
+        rect(s.minX, s.minZ, s.maxX, s.maxZ, '#2b303a');                   // paved forecourt
+        rect(b.minX, b.minZ, b.maxX, b.maxZ, '#c9a23a');                   // the gold bank block
+      } else if (b.category === 'hideout' || b.category === 'chopshop') {
+        rect(s.minX, s.minZ, s.maxX, s.maxZ, '#31463a');                   // edge lot
+        rect(b.minX + 8, b.minZ + 2, b.maxX - 8, b.minZ + 30, '#4a4f57');  // the lockup shed
+      } else if (b.category === 'finance') {
         rect(s.minX, s.minZ, s.maxX, s.maxZ, shade('#2b303a', vary));      // paved block
         rect(b.minX, b.minZ, b.maxX, b.maxZ, shade('#48586e', vary));      // tower footprint
       } else if (b.category === 'residential') {
@@ -147,6 +153,14 @@ export function createWorldMap(model, missions) {
     const cx = (e.clientX - rect.left) * (big.width / rect.width);
     const cy = (e.clientY - rect.top) * (big.height / rect.height);
     if (cx > big.width - 70 && cy < 70) { setBig(false); return; }   // ✕
+    if (heist && heist.available()) {
+      const pin = heist.mapPin();
+      const dx = cx - BX(pin.x), dy = cy - BY(pin.z);
+      if (dx * dx + dy * dy < 36 * 36) {
+        if (heist.select()) setBig(false);
+        return;
+      }
+    }
     if (missions) {
       const jb = missions.jobs();
       for (let i = 0; i < jb.length; i++) {
@@ -184,9 +198,12 @@ export function createWorldMap(model, missions) {
 
   return {
     update(carPos, yaw, dbg) {
-      const target = dbg && (dbg.state === 'idle' ? dbg.pickup : dbg.drop);
+      // an active heist stage overrides the delivery route (heat-red)
+      const hTarget = heist ? heist.target() : null;
+      const target = hTarget || (dbg && (dbg.state === 'idle' ? dbg.pickup : dbg.drop));
       const pickup = dbg && dbg.pickup, drop = dbg && dbg.drop;
-      const routeCol = dbg && dbg.state === 'idle' ? 'rgba(53,208,127,0.95)' : 'rgba(255,160,48,0.95)';
+      const routeCol = hTarget ? 'rgba(255,90,60,0.95)'
+        : (dbg && dbg.state === 'idle' ? 'rgba(53,208,127,0.95)' : 'rgba(255,160,48,0.95)');
       const r = target ? route(carPos, target) : null;
 
       // ---------------- corner minimap: heading-up, zoomed, round ----------------
@@ -227,6 +244,7 @@ export function createWorldMap(model, missions) {
         };
         dot(pickup, '#35d07f', 4.5, dbg && dbg.state === 'idle');
         dot(drop, '#ffa030', 4.5, dbg && dbg.state === 'carrying');
+        if (hTarget) dot(hTarget, '#ff5a3c', 5, true);
         // open jobs as faint pins, so you spot work while cruising
         if (missions) {
           const jb = missions.jobs();
@@ -274,6 +292,22 @@ export function createWorldMap(model, missions) {
         const dot = (p, col, rr) => { if (!p) return; bctx.fillStyle = col; bctx.beginPath(); bctx.arc(BX(p.x), BY(p.z), rr, 0, Math.PI * 2); bctx.fill(); };
         dot(pickup, '#35d07f', 8);
         dot(drop, '#ffa030', 8);
+        // the heist pin: the bank job, tappable when the bank is "open"
+        if (heist && heist.available()) {
+          const pin = heist.mapPin();
+          const x = BX(pin.x), y = BY(pin.z);
+          bctx.fillStyle = 'rgba(24,12,10,0.9)';
+          bctx.beginPath(); bctx.arc(x, y, 19, 0, Math.PI * 2); bctx.fill();
+          bctx.strokeStyle = '#e8c04a'; bctx.lineWidth = 3;
+          bctx.beginPath(); bctx.arc(x, y, 19, 0, Math.PI * 2); bctx.stroke();
+          bctx.textAlign = 'center'; bctx.textBaseline = 'middle';
+          bctx.font = 'bold 17px "DejaVu Sans Mono",monospace';
+          bctx.fillStyle = '#e8c04a';
+          bctx.fillText('💰', x, y + 1);
+          bctx.font = 'bold 13px "DejaVu Sans Mono",monospace';
+          bctx.fillText(`RÅN ~$${pin.pay}`, x, y + 33);
+          bctx.textAlign = 'left'; bctx.textBaseline = 'alphabetic';
+        }
         // the job board: open deliveries as tappable $-pins
         const carrying = missions && missions.state() === 'carrying';
         if (missions) {

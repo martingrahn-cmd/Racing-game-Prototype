@@ -23,6 +23,7 @@ import { createWorldTraffic } from './traffic_world.js';
 import { createPedestrians } from './pedestrians_world.js';
 import { createProps } from './props_world.js';
 import { createMissions } from './missions.js';
+import { createHeist } from './heist.js';
 import { createWorldMap } from './worldmap.js';
 import GUI from '../vendor/lil-gui.module.min.js';
 
@@ -103,7 +104,7 @@ const skidmarks = createSkidmarks(scene);
 let curve = null, length = 0, cornerSpans = null;
 let extras = null, traffic = null, minimap = null, signals = null, worldTraffic = null, pedestrians = null, drive;
 let worldModel = null, worldAttract = false, worldCollision = null, worldGeom = null, missions = null;
-let props = null, worldMap = null;
+let props = null, worldMap = null, heist = null;
 if (WORLD) {
   const model = createCityModel();
   // ?x=&z=(&yaw=) teleports the spawn — photo bug reports carry coordinates, so
@@ -123,7 +124,8 @@ if (WORLD) {
   pedestrians = createPedestrians(scene, model, signals);
   props = createProps(scene, model);
   missions = createMissions(scene, model);
-  worldMap = createWorldMap(model, missions);
+  heist = createHeist(scene, model, missions, camera);
+  worldMap = createWorldMap(model, missions, heist);
   const collision = createCollision(model, {
     buildings: worldObj.colliders.buildings,
     obstacles: [...worldObj.obstacles, ...signals.obstacles, ...props.obstacles],
@@ -131,7 +133,7 @@ if (WORLD) {
   worldCollision = collision;
   // debug handles for automated (CDP) perf checks — lets a test drive the LOD /
   // crowd logic from an arbitrary probe point without playing there
-  window.__world = { geom: worldGeom, traffic: worldTraffic, peds: pedestrians, model, missions };
+  window.__world = { geom: worldGeom, traffic: worldTraffic, peds: pedestrians, model, missions, heist };
   drive = createDrive(null, 0, { world: { spawn: model.spawn, collision, curbY: model.CURB_Y, ramps: worldObj.ramps } });
   // atmospheric fade at the district edge — and clip the far plane to just past
   // the fog so all the fully-fogged (invisible) distant buildings down long
@@ -192,7 +194,7 @@ const GAME_FILES = [
   'src/night.js', 'src/minimap.js',
   'src/citymodel.js', 'src/world.js', 'src/signals.js', 'src/collision.js',
   'src/traffic_world.js', 'src/pedestrians_world.js', 'src/props_world.js', 'src/missions.js',
-  'src/worldmap.js',
+  'src/worldmap.js', 'src/heist.js',
   'vendor/three.module.js', 'vendor/lil-gui.module.min.js',
   'vendor/loaders/GLTFLoader.js', 'vendor/loaders/DRACOLoader.js',
   'vendor/utils/BufferGeometryUtils.js', 'vendor/utils/SkeletonUtils.js',
@@ -685,7 +687,12 @@ function loop(now) {
   if (rawDt > 0) fpsInst += (Math.min(1 / rawDt, 240) - fpsInst) * 0.1;
   const _t0 = performance.now();
 
-  const st = drive.update(dt, sPos, WORLD ? (worldTraffic && worldTraffic.cars) : traffic.cars);
+  // collide against traffic — and any police on your tail
+  const copCars = WORLD && heist ? heist.cars() : null;
+  const collideCars = WORLD
+    ? (copCars && copCars.length ? worldTraffic.cars.concat(copCars) : worldTraffic && worldTraffic.cars)
+    : traffic.cars;
+  const st = drive.update(dt, sPos, collideCars);
   if (st) audio.resume(); // gamepad-only players never fire DOM gestures
   if (WORLD && st && worldAttract) { worldAttract = false; camMode = 0; smoothedPos = null; } // took the wheel
   if (drive.consumeCameraTap()) cycleCamera();
@@ -729,6 +736,7 @@ function loop(now) {
     // (and nothing else — speed is 0, so no knock-launches) still cull sensibly
     if (props) props.update(dt, st ? st.pos : camera.position, st ? st.heading : null, st ? st.speed : 0);
     if (missions) missions.update(dt, st);
+    if (heist) heist.update(dt, st);
     if (worldMap) worldMap.update(st ? st.pos : carGround, st ? st.yaw : worldModel.spawn.yaw, missions.dbg());
   } else {
     extras.update(dt);

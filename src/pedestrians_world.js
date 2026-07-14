@@ -23,7 +23,7 @@ import { getDayness } from './night.js';
 // sharing ONE material → 1 draw per pedestrian, same look. Skips (keeps the
 // multi-part frames) if any material is textured, so nothing is silently lost.
 const PED_VC_MAT = new THREE.MeshStandardMaterial({ roughness: 1, metalness: 0, vertexColors: true });
-function bakeFlipbookVC(fb) {
+export function bakeFlipbookVC(fb) {
   for (const frame of fb) for (const p of frame) {
     const m = p.material;
     if (!m || m.map || m.normalMap || m.emissiveMap || !m.color) return fb; // textured → keep parts
@@ -125,7 +125,8 @@ function seatParts(parts, s) {
 
 // Returns { frames, scale }. Frames are normalised to 1.72 m tall (feet at 0);
 // scale is reused so a seated pose of the same model keeps human proportions.
-function bakeFlipbook(gltf, clip, nFrames) {
+// (exported: the heist robbers bake their sprint cycles with the same rig)
+export function bakeFlipbook(gltf, clip, nFrames) {
   const frames = [];
   for (let f = 0; f < nFrames; f++) frames.push(bakePoseRaw(gltf, clip, clip.duration * (f / nFrames)));
   const box = new THREE.Box3();
