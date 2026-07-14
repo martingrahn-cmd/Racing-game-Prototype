@@ -1,19 +1,107 @@
-// Open-world minimap + full map (press M). North-up, whole-district street grid
-// with the player arrow, the pickup/drop markers, and a GPS-style route drawn
-// along the grid toward the current objective. Pure 2D canvas.
+// Open-world minimap + full map (press M).
+// - Corner minimap: a zoomed, heading-up view of the streets around the car —
+//   the MAP rotates and the player arrow stays fixed pointing up (driving-game
+//   convention), with the GPS route and an edge-clamped objective marker.
+// - Full map (M): the whole district as a north-up miniature.
+// The city itself (roads, district-tinted blocks, building footprints, the
+// plaza with its fountain/pond/playground) is rendered ONCE into an offscreen
+// canvas; per-frame work is one rotated blit + the dynamic overlays.
 export function createWorldMap(model) {
   const nodes = model.nodes;
   const lo = model.min - model.ROAD_HW, hi = model.max + model.ROAD_HW;
   const span = hi - lo || 1;
   const roadHW = model.ROAD_HW;
+  const VIEW_R = 170;        // metres of world shown from centre to minimap edge
 
-  // corner minimap reuses the existing round canvas
+  // ---------------------------------------------------------- static city art
+  const BASE = 1024;
+  const k0 = BASE / span;                    // base-canvas pixels per metre
+  const bx = (wx) => (wx - lo) * k0;
+  const by = (wz) => BASE - (wz - lo) * k0;  // north up
+  const base = document.createElement('canvas');
+  base.width = base.height = BASE;
+  {
+    const c = base.getContext('2d');
+    c.fillStyle = '#161b22';                                   // ground
+    c.fillRect(0, 0, BASE, BASE);
+    // streets
+    c.strokeStyle = '#3a4049';
+    c.lineWidth = roadHW * 2 * k0;
+    c.beginPath();
+    for (const n of nodes) {
+      c.moveTo(bx(n), by(lo)); c.lineTo(bx(n), by(hi));
+      c.moveTo(bx(lo), by(n)); c.lineTo(bx(hi), by(n));
+    }
+    c.stroke();
+    // centre-line dashes give the roads their "map" read
+    c.strokeStyle = 'rgba(230,236,245,0.16)';
+    c.lineWidth = Math.max(1, 0.5 * k0);
+    c.setLineDash([4.4 * k0 * 2, 4.4 * k0 * 2]);
+    c.beginPath();
+    for (const n of nodes) {
+      c.moveTo(bx(n), by(lo)); c.lineTo(bx(n), by(hi));
+      c.moveTo(bx(lo), by(n)); c.lineTo(bx(hi), by(n));
+    }
+    c.stroke();
+    c.setLineDash([]);
+
+    const rect = (x0, z0, x1, z1, col) => {
+      c.fillStyle = col;
+      c.fillRect(Math.min(bx(x0), bx(x1)), Math.min(by(z0), by(z1)), Math.abs(bx(x1) - bx(x0)), Math.abs(by(z1) - by(z0)));
+    };
+    // blocks: sidewalk slab + district-tinted building footprints, so the map
+    // is an honest miniature — towers in the middle, apartments ringing their
+    // blocks, villas on green lots with houses along the street edges
+    for (const b of model.buildings) {
+      const s = b.slab;
+      const vary = ((b.bi * 7 + b.bj * 13) % 5) * 0.012 - 0.024;
+      const shade = (hex, d) => {
+        const v = parseInt(hex.slice(1), 16);
+        const f = (x) => Math.max(0, Math.min(255, Math.round(((v >> x) & 255) * (1 + d))));
+        return `rgb(${f(16)},${f(8)},${f(0)})`;
+      };
+      if (b.category === 'finance') {
+        rect(s.minX, s.minZ, s.maxX, s.maxZ, shade('#2b303a', vary));      // paved block
+        rect(b.minX, b.minZ, b.maxX, b.maxZ, shade('#48586e', vary));      // tower footprint
+      } else if (b.category === 'residential') {
+        rect(s.minX, s.minZ, s.maxX, s.maxZ, shade('#3a3733', vary));      // paved block
+        rect(b.minX, b.minZ, b.maxX, b.maxZ, shade('#57493f', vary));      // apartment ring
+        const in2 = 9; // apartments line the edges; the courtyard sits inside
+        rect(b.minX + in2, b.minZ + in2, b.maxX - in2, b.maxZ - in2, shade('#3a3733', vary));
+      } else {
+        rect(s.minX, s.minZ, s.maxX, s.maxZ, shade('#2f4633', vary));      // lawn lot
+        // houses ring the street edges: a thin brick band, hollow centre
+        rect(b.minX + 2, b.minZ + 2, b.maxX - 2, b.maxZ - 2, shade('#6b3f34', vary));
+        rect(b.minX + 11, b.minZ + 11, b.maxX - 11, b.maxZ - 11, shade('#2f4633', vary));
+      }
+    }
+    // the plaza park with its landmarks
+    if (model.plaza) {
+      const p = model.plaza;
+      rect(p.minX, p.minZ, p.maxX, p.maxZ, '#2f5a3a');
+      const dot = (wx, wz, rm, col) => { c.fillStyle = col; c.beginPath(); c.arc(bx(wx), by(wz), rm * k0, 0, Math.PI * 2); c.fill(); };
+      c.strokeStyle = '#8a8069'; c.lineWidth = 2.8 * k0;                   // gravel ring + spurs
+      c.beginPath(); c.arc(bx(p.cx), by(p.cz), 12 * k0, 0, Math.PI * 2); c.stroke();
+      c.beginPath();
+      for (const [ox, oz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        c.moveTo(bx(p.cx + ox * 12), by(p.cz + oz * 12));
+        c.lineTo(bx(p.cx + ox * ((p.maxX - p.minX) / 2 - 2)), by(p.cz + oz * ((p.maxZ - p.minZ) / 2 - 2)));
+      }
+      c.stroke();
+      dot(p.cx, p.cz, 6.4, '#b7b1a4'); dot(p.cx, p.cz, 5.6, '#3f7fa8');    // fountain
+      dot(p.cx - 23, p.cz + 21, 6.6, '#3f7fa8');                           // pond
+      rect(p.cx + 15 - 5.5, p.cz - 13 - 5.5, p.cx + 15 + 5.5, p.cz - 13 + 5.5, '#8a7a5a'); // playground
+      dot(p.cx - 15, p.cz - 13, 3.6, '#e8e2d4');                           // gazebo
+      rect(p.cx + 15 - 1.5, p.cz + 14 - 1.5, p.cx + 15 + 1.5, p.cz + 14 + 1.5, '#b9a894'); // clock tower
+    }
+  }
+
+  // ---------------------------------------------------------- canvases
   const el = document.getElementById('minimap');
   el.style.display = 'block';
-  el.style.borderRadius = '14px'; // square-ish so the grid corners aren't clipped
+  el.style.borderRadius = '50%';   // heading-up map spins — keep it round
   const ctx = el.getContext('2d');
 
-  // full-screen map overlay, toggled with M
   const big = document.createElement('canvas');
   big.width = big.height = 760;
   big.style.cssText = 'position:fixed;inset:0;margin:auto;z-index:19;display:none;'
@@ -44,83 +132,106 @@ export function createWorldMap(model) {
       [nodes[gxt], nodes[gzt]],           // turn up an avenue
       [to.x, to.z],
     ];
-    // drop consecutive duplicates
     const out = [];
     for (const p of pts) { const l = out[out.length - 1]; if (!l || Math.hypot(l[0] - p[0], l[1] - p[1]) > 1) out.push(p); }
     return out;
   }
 
-  function draw(c, S, pad) {
-    const k = (S - pad * 2) / span;
-    const X = (wx) => pad + (wx - lo) * k;
-    const Y = (wz) => S - (pad + (wz - lo) * k); // north up
-    c.clearRect(0, 0, S, S);
-
-    // block fills (everything that isn't road) for a city-map look
-    c.fillStyle = 'rgba(120,132,150,0.16)';
-    for (let i = 0; i < nodes.length - 1; i++) {
-      for (let j = 0; j < nodes.length - 1; j++) {
-        const x0 = X(nodes[i] + roadHW), x1 = X(nodes[i + 1] - roadHW);
-        const y0 = Y(nodes[j] + roadHW), y1 = Y(nodes[j + 1] - roadHW);
-        c.fillRect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0));
-      }
-    }
-    // plaza in green
-    if (model.plaza) {
-      const p = model.plaza;
-      const x0 = X(p.minX), x1 = X(p.maxX), y0 = Y(p.minZ), y1 = Y(p.maxZ);
-      c.fillStyle = 'rgba(74,140,70,0.5)';
-      c.fillRect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0));
-    }
-    // streets: the grid lines
-    c.strokeStyle = 'rgba(230,236,245,0.28)';
-    c.lineWidth = Math.max(1.5, roadHW * k * 0.9);
-    c.beginPath();
-    for (const n of nodes) { c.moveTo(X(n), Y(lo)); c.lineTo(X(n), Y(hi)); c.moveTo(X(lo), Y(n)); c.lineTo(X(hi), Y(n)); }
-    c.stroke();
-    return { X, Y };
-  }
-
-  let lastRoute = null, lastTarget = null;
-
   return {
     update(carPos, yaw, dbg) {
-      // recompute the route occasionally toward the active objective
       const target = dbg && (dbg.state === 'idle' ? dbg.pickup : dbg.drop);
-      const both = { pickup: dbg && dbg.pickup, drop: dbg && dbg.drop, state: dbg && dbg.state };
+      const pickup = dbg && dbg.pickup, drop = dbg && dbg.drop;
+      const routeCol = dbg && dbg.state === 'idle' ? 'rgba(53,208,127,0.95)' : 'rgba(255,160,48,0.95)';
+      const r = target ? route(carPos, target) : null;
 
-      const paint = (c, S, pad, big) => {
-        const { X, Y } = draw(c, S, pad);
-        // route to the objective
-        if (target) {
-          const r = route(carPos, target);
-          c.strokeStyle = dbg.state === 'idle' ? 'rgba(53,208,127,0.95)' : 'rgba(255,160,48,0.95)';
-          c.lineWidth = big ? 5 : 3;
-          c.lineCap = 'round'; c.lineJoin = 'round';
-          c.setLineDash(big ? [14, 10] : [8, 6]);
-          c.beginPath();
-          r.forEach((p, i) => (i ? c.lineTo(X(p[0]), Y(p[1])) : c.moveTo(X(p[0]), Y(p[1]))));
-          c.stroke();
-          c.setLineDash([]);
+      // ---------------- corner minimap: heading-up, zoomed, round ----------------
+      {
+        const S = el.width;
+        const ppm = (S / 2) / VIEW_R;             // screen px per metre
+        ctx.clearRect(0, 0, S, S);
+        ctx.save();
+        ctx.beginPath(); ctx.arc(S / 2, S / 2, S / 2 - 1, 0, Math.PI * 2); ctx.clip();
+        ctx.fillStyle = '#161b22'; ctx.fillRect(0, 0, S, S);
+        ctx.translate(S / 2, S / 2);
+        ctx.rotate(-yaw);                         // heading up: rotate the world, not the arrow
+        // world point -> px in this rotated frame
+        const PX = (wx) => (wx - carPos.x) * ppm;
+        const PY = (wz) => -(wz - carPos.z) * ppm;
+        // rotated blit of the pre-rendered city
+        const s2 = ppm / k0;
+        ctx.drawImage(base, -bx(carPos.x) * s2, -by(carPos.z) * s2, BASE * s2, BASE * s2);
+        // route
+        if (r) {
+          ctx.strokeStyle = routeCol;
+          ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+          ctx.setLineDash([8, 6]);
+          ctx.beginPath();
+          r.forEach((p, i) => (i ? ctx.lineTo(PX(p[0]), PY(p[1])) : ctx.moveTo(PX(p[0]), PY(p[1]))));
+          ctx.stroke();
+          ctx.setLineDash([]);
         }
-        // markers
-        const dot = (p, col, rr) => { if (!p) return; c.fillStyle = col; c.beginPath(); c.arc(X(p.x), Y(p.z), rr, 0, Math.PI * 2); c.fill(); };
-        dot(both.pickup, '#35d07f', big ? 8 : 4.5);
-        dot(both.drop, '#ffa030', big ? 8 : 4.5);
-        // player arrow
-        const px = X(carPos.x), py = Y(carPos.z);
-        c.save(); c.translate(px, py); c.rotate(yaw);
-        c.fillStyle = '#ff3b30';
-        const s = big ? 1.7 : 1;
-        c.beginPath(); c.moveTo(0, -7 * s); c.lineTo(4.6 * s, 5 * s); c.lineTo(-4.6 * s, 5 * s); c.closePath(); c.fill();
-        c.restore();
-      };
+        // markers — the active objective clamps to the rim so it always shows
+        const maxM = (S / 2 - 9) / ppm;
+        const dot = (p, col, rr, clamp) => {
+          if (!p) return;
+          let dx = p.x - carPos.x, dz = p.z - carPos.z;
+          const d = Math.hypot(dx, dz);
+          if (d > maxM) { if (!clamp) return; dx *= maxM / d; dz *= maxM / d; }
+          ctx.fillStyle = col;
+          ctx.beginPath(); ctx.arc(dx * ppm, -dz * ppm, rr, 0, Math.PI * 2); ctx.fill();
+        };
+        dot(pickup, '#35d07f', 4.5, dbg && dbg.state === 'idle');
+        dot(drop, '#ffa030', 4.5, dbg && dbg.state !== 'idle');
+        ctx.restore();
+        // upright N at the rim, toward world north (rim angle follows the map spin)
+        const nR = S / 2 - 10;
+        ctx.fillStyle = 'rgba(255,255,255,0.75)';
+        ctx.font = `bold ${Math.round(S * 0.085)}px "DejaVu Sans Mono",monospace`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('N', S / 2 - nR * Math.sin(yaw), S / 2 - nR * Math.cos(yaw));
+        // fixed player arrow, always pointing up
+        ctx.save();
+        ctx.translate(S / 2, S / 2);
+        ctx.fillStyle = '#ff3b30';
+        ctx.strokeStyle = 'rgba(0,0,0,0.55)'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(0, -7); ctx.lineTo(4.6, 5); ctx.lineTo(0, 2.6); ctx.lineTo(-4.6, 5); ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        ctx.restore();
+        // rim
+        ctx.strokeStyle = 'rgba(255,255,255,0.22)'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(S / 2, S / 2, S / 2 - 1, 0, Math.PI * 2); ctx.stroke();
+      }
 
-      paint(ctx, el.width, 12, false);
+      // ---------------- full map (M): north-up city miniature ----------------
       if (bigOpen) {
-        paint(bctx, big.width, 40, true);
+        const S = big.width, pad = 40;
+        const k = (S - pad * 2) / span;
+        const X = (wx) => pad + (wx - lo) * k;
+        const Y = (wz) => S - (pad + (wz - lo) * k);
+        bctx.clearRect(0, 0, S, S);
+        bctx.drawImage(base, pad, pad, S - pad * 2, S - pad * 2);
+        if (r) {
+          bctx.strokeStyle = routeCol;
+          bctx.lineWidth = 5; bctx.lineCap = 'round'; bctx.lineJoin = 'round';
+          bctx.setLineDash([14, 10]);
+          bctx.beginPath();
+          r.forEach((p, i) => (i ? bctx.lineTo(X(p[0]), Y(p[1])) : bctx.moveTo(X(p[0]), Y(p[1]))));
+          bctx.stroke();
+          bctx.setLineDash([]);
+        }
+        const dot = (p, col, rr) => { if (!p) return; bctx.fillStyle = col; bctx.beginPath(); bctx.arc(X(p.x), Y(p.z), rr, 0, Math.PI * 2); bctx.fill(); };
+        dot(pickup, '#35d07f', 8);
+        dot(drop, '#ffa030', 8);
+        // player arrow (north-up map -> the arrow itself rotates with the car)
+        bctx.save(); bctx.translate(X(carPos.x), Y(carPos.z)); bctx.rotate(yaw);
+        bctx.fillStyle = '#ff3b30';
+        bctx.strokeStyle = 'rgba(0,0,0,0.55)'; bctx.lineWidth = 2;
+        bctx.beginPath(); bctx.moveTo(0, -12); bctx.lineTo(7.8, 8.5); bctx.lineTo(0, 4.4); bctx.lineTo(-7.8, 8.5); bctx.closePath();
+        bctx.fill(); bctx.stroke();
+        bctx.restore();
         bctx.fillStyle = 'rgba(255,255,255,0.9)';
         bctx.font = 'bold 22px "DejaVu Sans Mono",monospace';
+        bctx.textAlign = 'left'; bctx.textBaseline = 'alphabetic';
         bctx.fillText('APEX CITY — KARTA', 40, 44);
         bctx.font = '14px "DejaVu Sans Mono",monospace';
         bctx.fillStyle = 'rgba(255,255,255,0.6)';

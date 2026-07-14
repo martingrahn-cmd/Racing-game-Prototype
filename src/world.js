@@ -566,15 +566,21 @@ function addBuildingLOD(group, parts, list, cellsOut, opts = {}) {
   {
     const nrm = boxGeo.attributes.normal, n = boxGeo.attributes.position.count;
     const col = new Float32Array(n * 3);
-    const wall = sampled ? sampled.wall : new THREE.Color(0xffffff);
-    const roof = sampled ? sampled.roof : new THREE.Color(0xffffff);
+    // real facades read darker than their average paint (windows, doors, eave
+    // shadows) — darken the flat box to match, or pale walls pop as white slabs
+    const wall = sampled ? sampled.wall.clone().multiplyScalar(0.78) : new THREE.Color(0xffffff);
+    const roof = sampled ? sampled.roof.clone().multiplyScalar(0.78) : new THREE.Color(0xffffff);
     for (let i = 0; i < n; i++) { const c = nrm.getY(i) > 0.5 ? roof : wall; col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
     boxGeo.setAttribute('color', new THREE.BufferAttribute(col, 3));
   }
   // white base whenever the box is coloured by sampling or per-instance tint;
   // impostorColor stays only as the fallback for unsampled, untinted models
-  const baseCol = (sampled || opts.color) ? 0xffffff : (opts.impostorColor || 0x8a8886);
-  const boxMat = new THREE.MeshStandardMaterial({ color: baseCol, vertexColors: true, roughness: 0.92, metalness: 0 });
+  const baseCol = new THREE.Color((sampled || opts.color) ? 0xffffff : (opts.impostorColor || 0x8a8886));
+  const boxMat = new THREE.MeshStandardMaterial({ color: baseCol.clone(), vertexColors: true, roughness: 0.92, metalness: 0 });
+  // At night an unlit detail building is a dark silhouette with a few lit
+  // windows, but a flat moonlit box stayed pale — THE remaining "white blocks
+  // popping in" (#112). Pull the impostors down toward silhouette after dark.
+  registerCustom((d) => { boxMat.color.copy(baseCol).multiplyScalar(0.38 + 0.62 * d); });
   const q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3(), M = new THREE.Matrix4();
 
   // Box impostors are 12-triangle throwaways, so what actually costs us on the
