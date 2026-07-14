@@ -77,8 +77,8 @@ const NFRAMES = 30;       // baked walk-cycle frames (free at runtime via geomet
 const STRIDE = 1.35;      // metres travelled per full walk cycle → foot-locked, no sliding
 // touch devices run a lighter crowd (per-frame AI + flipbook updates cost CPU)
 const MOBILE = ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0;
-const DAY_CROWD = MOBILE ? 120 : 460;  // pool size at full daylight (4× map; nearest render)
-const NIGHT_CROWD = MOBILE ? 48 : 150; // active pedestrians at night
+const DAY_CROWD = MOBILE ? 160 : 460;  // pool size at full daylight (4× map; nearest render)
+const NIGHT_CROWD = MOBILE ? 64 : 150; // active pedestrians at night
 
 // Bake a full walk-cycle flipbook from one model. Clone the rig ONCE, then sample
 // NFRAMES evenly across the clip, baking each posed frame into static world-space
