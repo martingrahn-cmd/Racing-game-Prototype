@@ -8,7 +8,7 @@
 // The city itself (roads, district-tinted blocks, building footprints, the
 // plaza with its fountain/pond/playground) is rendered ONCE into an offscreen
 // canvas; per-frame work is one rotated blit + the dynamic overlays.
-export function createWorldMap(model, missions, heist) {
+export function createWorldMap(model, missions, heist, police) {
   const nodes = model.nodes;
   const lo = model.min - model.ROAD_HW, hi = model.max + model.ROAD_HW;
   const span = hi - lo || 1;
@@ -256,6 +256,23 @@ export function createWorldMap(model, missions, heist) {
             ctx.beginPath(); ctx.arc(-dx * ppm, -dz * ppm, 3, 0, Math.PI * 2); ctx.fill();
           }
         }
+        // the law: a wedge per patrol car, pointing where it's looking —
+        // blue on patrol, hot red while they're chasing you
+        if (police) {
+          const hot = police.chasing();
+          for (const c of police.cars) {
+            const dx = c.group.position.x - carPos.x, dz = c.group.position.z - carPos.z;
+            if (Math.hypot(dx, dz) > maxM) continue;
+            ctx.save();
+            ctx.translate(-dx * ppm, -dz * ppm);
+            ctx.rotate(-c.yaw);                 // mirrored axis → negated yaw
+            ctx.fillStyle = hot ? '#ff4a3c' : '#5aa8ff';
+            ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.lineWidth = 1.2;
+            ctx.beginPath(); ctx.moveTo(0, -5.6); ctx.lineTo(3.8, 4.2); ctx.lineTo(0, 2.1); ctx.lineTo(-3.8, 4.2); ctx.closePath();
+            ctx.fill(); ctx.stroke();
+            ctx.restore();
+          }
+        }
         ctx.restore();
         // upright N at the rim, toward world north (rim angle follows the map spin)
         const nR = S / 2 - 10;
@@ -330,6 +347,18 @@ export function createWorldMap(model, missions, heist) {
             bctx.globalAlpha = 1;
           }
           bctx.textAlign = 'left';
+        }
+        // the police fleet, with facing (blue = patrol, red = after you)
+        if (police) {
+          const hot = police.chasing();
+          for (const c of police.cars) {
+            bctx.save(); bctx.translate(BX(c.group.position.x), BY(c.group.position.z)); bctx.rotate(-c.yaw);
+            bctx.fillStyle = hot ? '#ff4a3c' : '#5aa8ff';
+            bctx.strokeStyle = 'rgba(0,0,0,0.6)'; bctx.lineWidth = 1.6;
+            bctx.beginPath(); bctx.moveTo(0, -9); bctx.lineTo(6, 6.6); bctx.lineTo(0, 3.3); bctx.lineTo(-6, 6.6); bctx.closePath();
+            bctx.fill(); bctx.stroke();
+            bctx.restore();
+          }
         }
         // player arrow (north-up map -> the arrow itself rotates with the car;
         // negated yaw on the mirrored axis)
