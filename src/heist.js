@@ -5,13 +5,13 @@
 //   outrun the police to the hideout on the villa edge → drop the crew →
 //   dump the hot car at the chop-shop to kill the heat → paid.
 // The robbers are baked sprint flipbooks (same pipeline as the pedestrians,
-// so they render correctly); the cops are the traffic cop model with a
-// flashing light bar and greedy grid pursuit. The bank / hideout / chop-shop
-// are procedural landmarks on blocks reserved in citymodel.js.
+// so they render correctly); the police are the city's standing patrol fleet
+// (police.js) — the heist just flips them ALL to pursuit at once. The bank /
+// hideout / chop-shop are procedural landmarks on blocks reserved in
+// citymodel.js.
 import * as THREE from 'three';
-import { makeGLTFLoader, rigWheels } from './car.js';
+import { makeGLTFLoader } from './car.js';
 import { bakeFlipbook, bakeFlipbookVC } from './pedestrians_world.js';
-import { mergeCarByMaterial } from './traffic_world.js';
 import { registerEmissive } from './night.js';
 
 const N_CREW = 3;
@@ -137,8 +137,8 @@ function buildLockup(group, b, CURB_Y, label) {
   return { doorX: cx, doorZ: front + 0.4 };
 }
 
-export function createHeist(scene, model, missions, camera) {
-  const { CURB_Y, ROAD_HW, LANE, nodes, BLOCKS } = model;
+export function createHeist(scene, model, missions, camera, police) {
+  const { CURB_Y } = model;
   if (!model.bank || !model.hideout || !model.chopshop) return null;
   const group = new THREE.Group();
   scene.add(group);
@@ -190,87 +190,7 @@ export function createHeist(scene, model, missions, camera) {
   }
   function clearRunners() { for (const r of runners) group.remove(r.group); runners.length = 0; }
 
-  // ------------------------------------------------------------- the cops
-  let copTemplate = null;
-  loader.load('assets/traffic/cop.glb', (gltf) => { copTemplate = gltf; }, undefined, () => { /* no cops, softer heist */ });
-  const cops = [];
-  const V = new THREE.Vector3();
-  function spawnCop(ni, nj) {
-    if (!copTemplate) return;
-    const mdl = copTemplate.scene.clone(true);
-    const rig = rigWheels(mdl);
-    mdl.rotation.y = rig.forwardSign < 0 ? Math.PI : 0;
-    const holder = new THREE.Group();
-    holder.add(mdl);
-    const b1 = new THREE.Box3().setFromObject(holder);
-    const size = b1.getSize(V);
-    const scale = 4.6 / Math.max(size.x, size.z);
-    holder.scale.setScalar(scale);
-    const b2 = new THREE.Box3().setFromObject(holder);
-    const c = b2.getCenter(V);
-    mdl.position.x -= c.x / scale; mdl.position.z -= c.z / scale;
-    mdl.position.y -= b2.min.y / scale;
-    holder.traverse((o) => { if (o.isMesh) o.castShadow = true; });
-    mergeCarByMaterial(holder);
-    // flashing light bar (added after the merge so the mats stay toggleable)
-    const top = new THREE.Box3().setFromObject(holder).max.y;
-    const mkLight = (col, x) => {
-      const m = new THREE.MeshStandardMaterial({ color: 0x111111, emissive: col, emissiveIntensity: 0 });
-      const box = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.16, 0.3), m);
-      box.position.set(x, top + 0.02, -0.1);
-      holder.add(box);
-      return m;
-    };
-    const container = new THREE.Group();
-    container.add(holder);
-    const ni2 = Math.max(1, Math.min(BLOCKS - 1, ni)), nj2 = Math.max(1, Math.min(BLOCKS - 1, nj));
-    container.position.set(nodes[ni2], 0, nodes[nj2]);
-    group.add(container);
-    cops.push({
-      group: container, yaw: 0, ni: ni2, nj: nj2, dir: [0, 1], t: 0.02, speed: 22,
-      matL: mkLight(0xff2a20, -0.36), matR: mkLight(0x2a6bff, 0.36),
-    });
-  }
-  function clearCops() { for (const c of cops) group.remove(c.group); cops.length = 0; }
-  const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-  const nodeIdx = (v) => Math.max(0, Math.min(BLOCKS, Math.round((v - nodes[0]) / model.PITCH)));
-  function copUpdate(dt, playerPos, tt) {
-    for (const c of cops) {
-      const flash = Math.sin(tt * 11) > 0;
-      c.matL.emissiveIntensity = flash ? 3.4 : 0.1;
-      c.matR.emissiveIntensity = flash ? 0.1 : 3.4;
-      const dx = playerPos.x - c.group.position.x, dz = playerPos.z - c.group.position.z;
-      const dist = Math.hypot(dx, dz);
-      const target = dist > 250 ? 38 : dist < 16 ? 36 : 31;   // rubber band, ram up close
-      c.speed += THREE.MathUtils.clamp(target - c.speed, -18 * dt, 9 * dt);
-      c.t += c.speed * dt / model.PITCH;
-      if (c.t >= 1) {
-        c.t -= 1; c.ni += c.dir[0]; c.nj += c.dir[1];
-        // greedy grid chase: pick the neighbour node closest to the player
-        let best = null, bestD = Infinity;
-        for (const d of DIRS) {
-          const ni = c.ni + d[0], nj = c.nj + d[1];
-          if (ni < 0 || ni > BLOCKS || nj < 0 || nj > BLOCKS) continue;
-          if (d[0] === -c.dir[0] && d[1] === -c.dir[1]) continue; // no U-turns
-          const dd = (nodes[ni] - playerPos.x) ** 2 + (nodes[nj] - playerPos.z) ** 2;
-          if (dd < bestD) { bestD = dd; best = d; }
-        }
-        c.dir = best || [-c.dir[0], -c.dir[1]];
-      }
-      const Ax = nodes[c.ni], Az = nodes[c.nj];
-      const Bx = nodes[c.ni + c.dir[0]], Bz = nodes[c.nj + c.dir[1]];
-      const rx = -c.dir[1], rz = c.dir[0];
-      const px = Ax + (Bx - Ax) * c.t + rx * LANE * 0.4;
-      const pz = Az + (Bz - Az) * c.t + rz * LANE * 0.4;
-      c.group.position.set(px, 0, pz);
-      const targetYaw = Math.atan2(c.dir[0], c.dir[1]);
-      let dy = targetYaw - c.yaw;
-      while (dy > Math.PI) dy -= Math.PI * 2;
-      while (dy < -Math.PI) dy += Math.PI * 2;
-      c.yaw += dy * Math.min(1, 6 * dt);
-      c.group.rotation.y = c.yaw;
-    }
-  }
+  const V = new THREE.Vector3(); // scratch (speech-bubble projection)
 
   // ------------------------------------------------------------- state
   let phase = 'idle', cooldown = 0, aboard = 0, tt = 0;
@@ -280,7 +200,8 @@ export function createHeist(scene, model, missions, camera) {
   function setBeacon(spot) { beacon.group.position.copy(spot); beacon.group.visible = true; }
   function fail(msg) {
     toast(msg);
-    clearRunners(); clearCops();
+    clearRunners();
+    if (police) police.setChase(false);
     beacon.group.visible = false;
     phase = 'idle'; cooldown = 30;
     missions.setBusy(false);
@@ -298,7 +219,6 @@ export function createHeist(scene, model, missions, camera) {
       return null;
     },
     phase: () => phase,
-    cars: () => cops,
     select() {
       if (!api.available()) return false;
       if (missions.state() !== 'none') { toast('DISPATCH: Gör klart leveransen först.'); return false; }
@@ -360,9 +280,10 @@ export function createHeist(scene, model, missions, camera) {
           setBeacon(hideSpot);
           bubbleT = 2.8; bubblePos.copy(p);
           toast('GÄNGET: STEP ON IT BRO!! 🔫');
-          // the law arrives from three directions
-          const pi = nodeIdx(p.x), pj = nodeIdx(p.z);
-          spawnCop(pi - 2, pj); spawnCop(pi + 2, pj + 1); spawnCop(pi, pj - 2);
+          // the patrol fleet is already in the streets — every unit flips to
+          // pursuit THE MOMENT the alarm goes (far-off units respond from a
+          // side street 2-3 blocks out, #116)
+          if (police) police.setChase(true, p);
         }
       } else if (phase === 'chase') {
         const dist = d2(hideSpot);
@@ -403,7 +324,7 @@ export function createHeist(scene, model, missions, camera) {
           phase = 'done';
           fade.style.opacity = '1';
           setTimeout(() => {
-            clearCops();
+            if (police) police.setChase(false);
             beacon.group.visible = false;
             missions.addCash(PAY_DUMP, `KROM: Ny lack, inga spår. +$${PAY_DUMP}`);
             missions.setBusy(false);
@@ -413,9 +334,6 @@ export function createHeist(scene, model, missions, camera) {
           }, 650);
         }
       }
-
-      // police pursue through chase → unload → dump
-      if (cops.length && (phase === 'chase' || phase === 'unload' || phase === 'dump')) copUpdate(dt, p, tt);
 
       // the speech bubble tracks the car on screen
       if (bubbleT > 0) {
@@ -432,7 +350,7 @@ export function createHeist(scene, model, missions, camera) {
       }
     },
     dbg: () => ({
-      phase, aboard, cops: cops.length, cooldown: Math.round(cooldown), books: crewBooks.length,
+      phase, aboard, chasing: police ? police.chasing() : false, cooldown: Math.round(cooldown), books: crewBooks.length,
       runners: runners.map((r) => ({ delay: +r.delay.toFixed(2), boardT: +r.boardT.toFixed(2), done: r.done, x: +r.group.position.x.toFixed(1), z: +r.group.position.z.toFixed(1) })),
     }),
   };
