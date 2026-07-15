@@ -153,11 +153,12 @@ export function createWorldMap(model, missions, heist, police) {
     const cx = (e.clientX - rect.left) * (big.width / rect.width);
     const cy = (e.clientY - rect.top) * (big.height / rect.height);
     if (cx > big.width - 70 && cy < 70) { setBig(false); return; }   // ✕
-    if (heist && heist.available()) {
+    if (heist) {
       const pin = heist.mapPin();
       const dx = cx - BX(pin.x), dy = cy - BY(pin.z);
       if (dx * dx + dy * dy < 36 * 36) {
-        if (heist.select()) setBig(false);
+        if (heist.available()) { if (heist.select()) setBig(false); }
+        else if (heist.active()) { heist.abort(); setBig(false); }
         return;
       }
     }
@@ -309,20 +310,24 @@ export function createWorldMap(model, missions, heist, police) {
         const dot = (p, col, rr) => { if (!p) return; bctx.fillStyle = col; bctx.beginPath(); bctx.arc(BX(p.x), BY(p.z), rr, 0, Math.PI * 2); bctx.fill(); };
         dot(pickup, '#35d07f', 8);
         dot(drop, '#ffa030', 8);
-        // the heist pin: the bank job, tappable when the bank is "open"
-        if (heist && heist.available()) {
+        // the heist pin: gold when the bank is "open", red while the job runs
+        // (tap = abort), dimmed with a countdown during the cooldown
+        if (heist) {
           const pin = heist.mapPin();
           const x = BX(pin.x), y = BY(pin.z);
+          const running = heist.active();
+          const cd = heist.cooldownLeft();
+          const col = running ? '#ff5a3c' : heist.available() ? '#e8c04a' : 'rgba(200,200,200,0.45)';
           bctx.fillStyle = 'rgba(24,12,10,0.9)';
           bctx.beginPath(); bctx.arc(x, y, 19, 0, Math.PI * 2); bctx.fill();
-          bctx.strokeStyle = '#e8c04a'; bctx.lineWidth = 3;
+          bctx.strokeStyle = col; bctx.lineWidth = 3;
           bctx.beginPath(); bctx.arc(x, y, 19, 0, Math.PI * 2); bctx.stroke();
           bctx.textAlign = 'center'; bctx.textBaseline = 'middle';
           bctx.font = 'bold 17px "DejaVu Sans Mono",monospace';
-          bctx.fillStyle = '#e8c04a';
+          bctx.fillStyle = col;
           bctx.fillText('💰', x, y + 1);
           bctx.font = 'bold 13px "DejaVu Sans Mono",monospace';
-          bctx.fillText(`RÅN ~$${pin.pay}`, x, y + 33);
+          bctx.fillText(running ? 'PÅGÅR · TRYCK = AVBRYT' : heist.available() ? `RÅN ~$${pin.pay}` : `ÖPPNAR OM ${cd}s`, x, y + 33);
           bctx.textAlign = 'left'; bctx.textBaseline = 'alphabetic';
         }
         // the job board: open deliveries as tappable $-pins
