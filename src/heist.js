@@ -219,6 +219,16 @@ export function createHeist(scene, model, missions, camera, police) {
       return null;
     },
     phase: () => phase,
+    active: () => phase !== 'idle' && phase !== 'done',
+    cooldownLeft: () => Math.max(0, Math.ceil(cooldown)),
+    // bail out of a running heist from the map (tap the pin) — without this a
+    // half-abandoned job locked out both the bank AND the delivery board
+    abort() {
+      if (phase === 'idle' || phase === 'done') return false;
+      fail('GÄNGET: Fegar du ur?! Glöm stålarna.');
+      cooldown = 15;
+      return true;
+    },
     select() {
       if (!api.available()) return false;
       if (missions.state() !== 'none') { toast('DISPATCH: Gör klart leveransen först.'); return false; }

@@ -63,13 +63,20 @@ export function createMissions(scene, model) {
   const jobs = [];
   for (let i = 0; i < N_JOBS; i++) jobs.push(genJob());
 
+  // progression persists across sessions (jobs/heist re-roll fresh each load):
+  // the wallet, the delivery count and which dispatcher beats have been heard
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem('apexSave') || '{}'); } catch { saved = {}; }
   let state = 'none', active = -1, pickup = null, drop = null;
-  let timer = 0, cash = 0, delivered = 0;
-  let style = 0, styleHot = 0, msgTimer = 0, tt = 0, shownBeat = -1;
+  let timer = 0, cash = saved.cash | 0, delivered = saved.delivered | 0;
+  let style = 0, styleHot = 0, msgTimer = 0, tt = 0, shownBeat = Number.isInteger(saved.shownBeat) ? saved.shownBeat : -1;
   let busy = false; // an outside job (the heist) owns the HUD & blocks deliveries
+  function save() {
+    try { localStorage.setItem('apexSave', JSON.stringify({ cash, delivered, shownBeat })); } catch { /* private mode */ }
+  }
 
   function dispatch(text) { msg.textContent = text; msg.style.opacity = '1'; msgTimer = 6; }
-  function maybeBeat() { for (const [n, text] of DISPATCH) { if (n === delivered && n !== shownBeat) { shownBeat = n; dispatch(text); break; } } }
+  function maybeBeat() { for (const [n, text] of DISPATCH) { if (n === delivered && n > shownBeat) { shownBeat = n; dispatch(text); save(); break; } } }
 
   function clearJob() {
     state = 'none'; active = -1; pickup = null; drop = null;
@@ -96,6 +103,7 @@ export function createMissions(scene, model) {
     const mult = 1 + style;
     const pay = Math.round((jobs[active].pay + timeBonus) * mult);
     cash += pay; delivered++;
+    save();
     dispatch(`LEVERERAT! +$${pay}  (tid $${timeBonus} · style x${mult.toFixed(1)})`);
     style = 0;
     jobs.splice(active, 1); jobs.push(genJob());
@@ -155,7 +163,7 @@ export function createMissions(scene, model) {
     state: () => state,
     // hooks for the heist (and future side jobs): share the wallet & the HUD
     setBusy(v) { busy = v; },
-    addCash(n, label) { cash += n; if (label) dispatch(label); },
+    addCash(n, label) { cash += n; save(); if (label) dispatch(label); },
     styleMult: () => 1 + style,
     dbg: () => ({ state, cash, delivered, pickup: pickup && { x: pickup.x, z: pickup.z }, drop: drop && { x: drop.x, z: drop.z } }),
   };
